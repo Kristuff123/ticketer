@@ -1,10 +1,15 @@
-import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
+import jwt, { type SignOptions } from 'jsonwebtoken';
+import { getDemoPasswords, getJwtSecret, getTokenExpiration } from '../config/env.js';
 import { UserRole } from '../models/enums.js';
 import { User, UserPreferences, Credentials, AuthResult } from '../models/user.js';
 import { IUserService } from './interfaces/index.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-do-not-use-in-production';
-const TOKEN_EXPIRATION = '15m';
+const JWT_SECRET = getJwtSecret();
+const TOKEN_EXPIRATION = getTokenExpiration();
+const jwtSignOptions: SignOptions = {
+  expiresIn: TOKEN_EXPIRATION as SignOptions['expiresIn'],
+};
 
 // In-memory user store (to be replaced with database layer later)
 const users: User[] = [
@@ -40,11 +45,32 @@ const users: User[] = [
   },
 ];
 
-// Simple password store (in production, use bcrypt hashes)
-const passwords: Record<string, string> = {
-  'admin@company.com': 'admin123',
-  'technician@company.com': 'tech123',
-  'reporter@company.com': 'reporter123',
+function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')): string {
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  const [salt, hash] = storedHash.split(':');
+  if (!salt || !hash) {
+    return false;
+  }
+
+  const expected = Buffer.from(hash, 'hex');
+  const actual = crypto.scryptSync(password, salt, 64);
+
+  if (expected.length !== actual.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expected, actual);
+}
+
+const demoPasswords = getDemoPasswords();
+const passwordHashes: Record<string, string> = {
+  'admin@company.com': hashPassword(demoPasswords.admin),
+  'technician@company.com': hashPassword(demoPasswords.technician),
+  'reporter@company.com': hashPassword(demoPasswords.reporter),
 };
 
 // In-memory ticket store reference for permission checks
@@ -84,8 +110,8 @@ export class UserService implements IUserService {
       return { success: false, error: 'User account is inactive' };
     }
 
-    const storedPassword = passwords[user.email.toLowerCase()];
-    if (!storedPassword || storedPassword !== credentials.password) {
+    const storedPasswordHash = passwordHashes[user.email.toLowerCase()];
+    if (!storedPasswordHash || !verifyPassword(credentials.password, storedPasswordHash)) {
       return { success: false, error: 'Invalid email or password' };
     }
 
@@ -208,7 +234,7 @@ export class UserService implements IUserService {
       role: user.role,
     };
 
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRATION });
+    return jwt.sign(payload, JWT_SECRET, jwtSignOptions);
   }
 
   validateToken(token: string): { valid: boolean; payload?: any } {
@@ -230,7 +256,7 @@ export class UserService implements IUserService {
     const { userId, email, role } = result.payload;
     const newPayload = { userId, email, role };
 
-    return jwt.sign(newPayload, JWT_SECRET, { expiresIn: TOKEN_EXPIRATION });
+    return jwt.sign(newPayload, JWT_SECRET, jwtSignOptions);
   }
 }
 

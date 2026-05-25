@@ -6,9 +6,14 @@ services:
     container_name: ticketer-backend
     restart: unless-stopped
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      TECHNICIAN_PASSWORD: ${TECHNICIAN_PASSWORD:-tech123}
+      REPORTER_PASSWORD: ${REPORTER_PASSWORD:-reporter123}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
       EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
       EMAIL_FROM: ${EMAIL_FROM:-IT Ticketer <noreply@example.com>}
       BREVO_SMTP_HOST: ${BREVO_SMTP_HOST:-smtp-relay.brevo.com}
