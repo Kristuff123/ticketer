@@ -9,8 +9,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-gray-500">Ładowanie...</div>
+      <div className="app-shell flex min-h-screen items-center justify-center">
+        <div className="surface rounded-2xl px-5 py-4 text-sm font-bold text-slate-600">
+          Ładowanie...
+        </div>
       </div>
     );
   }
@@ -37,8 +39,10 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-gray-500">Ładowanie...</div>
+      <div className="app-shell flex min-h-screen items-center justify-center">
+        <div className="surface rounded-2xl px-5 py-4 text-sm font-bold text-slate-600">
+          Ładowanie...
+        </div>
       </div>
     );
   }

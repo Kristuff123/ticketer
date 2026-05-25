@@ -7,10 +7,10 @@ interface TicketListProps {
 }
 
 const priorityBadge: Record<string, string> = {
-  CRITICAL: 'bg-red-100 text-red-800',
-  HIGH: 'bg-orange-100 text-orange-800',
-  MEDIUM: 'bg-yellow-100 text-yellow-800',
-  LOW: 'bg-green-100 text-green-800',
+  CRITICAL: 'bg-red-50 text-red-700 ring-red-200',
+  HIGH: 'bg-orange-50 text-orange-700 ring-orange-200',
+  MEDIUM: 'bg-amber-50 text-amber-700 ring-amber-200',
+  LOW: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
 };
 
 const priorityLabel: Record<string, string> = {
@@ -21,12 +21,12 @@ const priorityLabel: Record<string, string> = {
 };
 
 const statusBadge: Record<string, string> = {
-  NEW: 'bg-blue-100 text-blue-800',
-  IN_PROGRESS: 'bg-purple-100 text-purple-800',
-  WAITING_FOR_INFO: 'bg-amber-100 text-amber-800',
-  RESOLVED: 'bg-green-100 text-green-800',
-  CLOSED: 'bg-gray-100 text-gray-800',
-  REOPENED: 'bg-red-100 text-red-800',
+  NEW: 'bg-blue-50 text-blue-700 ring-blue-200',
+  IN_PROGRESS: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  WAITING_FOR_INFO: 'bg-amber-50 text-amber-700 ring-amber-200',
+  RESOLVED: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  CLOSED: 'bg-slate-100 text-slate-700 ring-slate-200',
+  REOPENED: 'bg-red-50 text-red-700 ring-red-200',
 };
 
 const statusLabel: Record<string, string> = {
@@ -41,63 +41,63 @@ const statusLabel: Record<string, string> = {
 export default function TicketList({ tickets, onSelect, selectedId }: TicketListProps) {
   if (tickets.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+      <div className="surface rounded-2xl p-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
         Brak zgłoszeń do wyświetlenia
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
+    <div className="surface overflow-hidden rounded-2xl">
       <table className="w-full">
-        <thead className="bg-gray-50 border-b border-gray-200">
+        <thead className="border-b border-slate-200 bg-slate-50/90 dark:border-slate-800 dark:bg-slate-900/80">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+            <th className="px-5 py-4 text-left text-xs font-black uppercase text-slate-400 dark:text-slate-500">
               Tytuł
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+            <th className="px-5 py-4 text-left text-xs font-black uppercase text-slate-400 dark:text-slate-500">
               Priorytet
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+            <th className="px-5 py-4 text-left text-xs font-black uppercase text-slate-400 dark:text-slate-500">
               Status
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+            <th className="px-5 py-4 text-left text-xs font-black uppercase text-slate-400 dark:text-slate-500">
               Data
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
           {tickets.map((ticket) => (
             <tr
               key={ticket.id}
               onClick={() => onSelect?.(ticket)}
-              className={`cursor-pointer hover:bg-gray-50 transition-colors ${
-                selectedId === ticket.id ? 'bg-blue-50' : ''
+              className={`cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/70 ${
+                selectedId === ticket.id ? 'bg-blue-50/80 dark:bg-blue-950/35' : ''
               }`}
             >
-              <td className="px-4 py-3">
-                <div className="text-sm font-medium text-gray-900">{ticket.title}</div>
-                <div className="text-xs text-gray-500">{ticket.category}</div>
+              <td className="px-5 py-4">
+                <div className="text-sm font-bold text-slate-950 dark:text-white">{ticket.title}</div>
+                <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{ticket.category}</div>
               </td>
-              <td className="px-4 py-3">
+              <td className="px-5 py-4">
                 <span
-                  className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
-                    priorityBadge[ticket.priority] || 'bg-gray-100 text-gray-800'
+                  className={`pill ring-1 ${
+                    priorityBadge[ticket.priority] || 'bg-slate-100 text-slate-700 ring-slate-200'
                   }`}
                 >
                   {priorityLabel[ticket.priority] || ticket.priority}
                 </span>
               </td>
-              <td className="px-4 py-3">
+              <td className="px-5 py-4">
                 <span
-                  className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
-                    statusBadge[ticket.status] || 'bg-gray-100 text-gray-800'
+                  className={`pill ring-1 ${
+                    statusBadge[ticket.status] || 'bg-slate-100 text-slate-700 ring-slate-200'
                   }`}
                 >
                   {statusLabel[ticket.status] || ticket.status}
                 </span>
               </td>
-              <td className="px-4 py-3 text-sm text-gray-500">
+              <td className="px-5 py-4 text-sm font-medium text-slate-500 dark:text-slate-400">
                 {new Date(ticket.createdAt).toLocaleDateString('pl-PL')}
               </td>
             </tr>

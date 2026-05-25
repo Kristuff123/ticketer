@@ -22,11 +22,11 @@ export default function QueueStats() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-white rounded-lg shadow p-4 animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-            <div className="h-8 bg-gray-200 rounded w-3/4"></div>
+          <div key={i} className="surface animate-pulse rounded-2xl p-5">
+            <div className="mb-3 h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700"></div>
+            <div className="h-8 w-3/4 rounded bg-slate-200 dark:bg-slate-700"></div>
           </div>
         ))}
       </div>
@@ -36,24 +36,24 @@ export default function QueueStats() {
   if (!stats) return null;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <div className="bg-white rounded-lg shadow p-4">
-        <p className="text-sm text-gray-500">Wszystkie zgłoszenia</p>
-        <p className="text-2xl font-bold text-gray-800">{stats.totalTickets}</p>
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="surface rounded-2xl p-5">
+        <p className="text-xs font-black uppercase text-slate-400 dark:text-slate-500">Wszystkie zgłoszenia</p>
+        <p className="mt-2 text-3xl font-black text-slate-950 dark:text-white">{stats.totalTickets}</p>
       </div>
-      <div className="bg-white rounded-lg shadow p-4">
-        <p className="text-sm text-gray-500">Otwarte</p>
-        <p className="text-2xl font-bold text-blue-600">{stats.openTickets}</p>
+      <div className="surface rounded-2xl p-5">
+        <p className="text-xs font-black uppercase text-slate-400 dark:text-slate-500">Otwarte</p>
+        <p className="mt-2 text-3xl font-black text-blue-700 dark:text-blue-400">{stats.openTickets}</p>
       </div>
-      <div className="bg-white rounded-lg shadow p-4">
-        <p className="text-sm text-gray-500">Zgodność z SLA</p>
-        <p className="text-2xl font-bold text-green-600">
+      <div className="surface rounded-2xl p-5">
+        <p className="text-xs font-black uppercase text-slate-400 dark:text-slate-500">Zgodność z SLA</p>
+        <p className="mt-2 text-3xl font-black text-emerald-700 dark:text-emerald-400">
           {stats.slaCompliance != null ? `${Math.round(stats.slaCompliance)}%` : '—'}
         </p>
       </div>
-      <div className="bg-white rounded-lg shadow p-4">
-        <p className="text-sm text-gray-500">Śr. czas odpowiedzi</p>
-        <p className="text-2xl font-bold text-purple-600">
+      <div className="surface rounded-2xl p-5">
+        <p className="text-xs font-black uppercase text-slate-400 dark:text-slate-500">Śr. czas odpowiedzi</p>
+        <p className="mt-2 text-3xl font-black text-teal-700 dark:text-teal-300">
           {stats.avgResponseTime != null
             ? `${Math.round(stats.avgResponseTime)} min`
             : '—'}
