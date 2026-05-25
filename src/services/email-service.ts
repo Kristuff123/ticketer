@@ -1,6 +1,8 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { Notification } from '../models/notification.js';
 
+const DEFAULT_FROM = '"IT Ticketer" <noreply@ticketer.local>';
+
 /**
  * Helper: delay for a given number of milliseconds.
  */
@@ -14,12 +16,15 @@ export function delay(ms: number): Promise<void> {
  */
 export class EmailService {
   private transporter: Transporter;
+  private fromAddress: string;
 
   /**
    * @param transportConfig - Nodemailer transport configuration.
    *   If not provided, creates a JSON transport (useful for testing).
    */
   constructor(transportConfig?: nodemailer.TransportOptions | Transporter) {
+    this.fromAddress = process.env.EMAIL_FROM || DEFAULT_FROM;
+
     if (transportConfig && 'sendMail' in transportConfig) {
       // Already a transporter instance (e.g., a mock)
       this.transporter = transportConfig as Transporter;
@@ -37,7 +42,7 @@ export class EmailService {
   async sendEmail(to: string, subject: string, body: string): Promise<boolean> {
     try {
       await this.transporter.sendMail({
-        from: '"IT Ticketer" <noreply@ticketer.local>',
+        from: this.fromAddress,
         to,
         subject,
         html: body,
@@ -103,5 +108,31 @@ export class EmailService {
   }
 }
 
-// Export a default instance (uses JSON transport for dev/test)
-export const emailService = new EmailService();
+export function createEmailServiceFromEnv(): EmailService {
+  const transport = process.env.EMAIL_TRANSPORT?.toLowerCase();
+  const smtpUser = process.env.BREVO_SMTP_LOGIN || process.env.SMTP_USER;
+  const smtpPass = process.env.BREVO_SMTP_KEY || process.env.SMTP_PASS;
+
+  if (transport === 'brevo' || smtpUser || smtpPass) {
+    if (!smtpUser || !smtpPass) {
+      console.warn('Email transport requested, but SMTP credentials are incomplete. Falling back to JSON transport.');
+      return new EmailService();
+    }
+
+    const port = Number(process.env.BREVO_SMTP_PORT || process.env.SMTP_PORT || 587);
+    return new EmailService({
+      host: process.env.BREVO_SMTP_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+      port,
+      secure: port === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    } as nodemailer.TransportOptions);
+  }
+
+  return new EmailService();
+}
+
+// Export a default instance. Uses Brevo/SMTP when configured, JSON transport otherwise.
+export const emailService = createEmailServiceFromEnv();

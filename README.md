@@ -46,6 +46,24 @@ npm run dev
 
 Frontend: http://localhost:5173, backend: http://localhost:3000.
 
+## Powiadomienia email przez Brevo
+
+Backend wysyła e-maile dla powiadomień, jeśli użytkownik ma włączone `emailNotifications` i skonfigurujesz SMTP w `.env`.
+
+1. Skopiuj `.env.example` do `.env`.
+2. W panelu Brevo wygeneruj klucz SMTP dla transakcyjnej wysyłki email.
+3. Ustaw:
+
+```bash
+EMAIL_TRANSPORT=brevo
+EMAIL_FROM="IT Ticketer <twoj-nadawca@twojadomena.pl>"
+BREVO_SMTP_LOGIN=twoj-login-smtp-z-brevo
+BREVO_SMTP_KEY=twoj-klucz-smtp-z-brevo
+```
+
+Domyślna konfiguracja używa hosta `smtp-relay.brevo.com` i portu `587`.
+Bez tych zmiennych aplikacja używa lokalnego transportu JSON, czyli nie wysyła realnych wiadomości.
+
 ## Konta testowe
 
 | Rola | Email | Hasło |
@@ -94,5 +112,10 @@ npm test
 - `PORT` (domyślnie 3000) — port backendu
 - `JWT_SECRET` — sekret JWT (zmień w produkcji)
 - `NODE_ENV` — `production` w Dockerze, `development` lokalnie
+- `EMAIL_TRANSPORT=brevo` — włącza wysyłkę przez Brevo SMTP
+- `EMAIL_FROM` — zweryfikowany nadawca wiadomości
+- `BREVO_SMTP_LOGIN` — login SMTP z Brevo
+- `BREVO_SMTP_KEY` — klucz SMTP z Brevo, nie API key
+- `BREVO_SMTP_HOST` / `BREVO_SMTP_PORT` — opcjonalnie, domyślnie `smtp-relay.brevo.com:587`
 
 Skopiuj `.env.example` do `.env` dla lokalnych ustawień środowiska.

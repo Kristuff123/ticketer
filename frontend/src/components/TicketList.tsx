@@ -1,4 +1,5 @@
 import type { Ticket } from '../api';
+import { STORE_LOCATIONS } from '../data/store-locations';
 
 interface TicketListProps {
   tickets: Ticket[];
@@ -37,6 +38,12 @@ const statusLabel: Record<string, string> = {
   CLOSED: 'Zamknięte',
   REOPENED: 'Ponownie otwarte',
 };
+
+function getLocationLabel(location?: string) {
+  if (!location) return 'Brak lokalizacji';
+  const store = STORE_LOCATIONS.find((item) => item.code === location);
+  return store ? store.code : location;
+}
 
 export default function TicketList({ tickets, onSelect, selectedId }: TicketListProps) {
   if (tickets.length === 0) {
@@ -77,7 +84,9 @@ export default function TicketList({ tickets, onSelect, selectedId }: TicketList
             >
               <td className="px-5 py-4">
                 <div className="text-sm font-bold text-slate-950 dark:text-white">{ticket.title}</div>
-                <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{ticket.category}</div>
+                <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  {ticket.category} · {getLocationLabel(ticket.location)}
+                </div>
               </td>
               <td className="px-5 py-4">
                 <span

@@ -1,5 +1,5 @@
 import { query, getClient } from '../connection.js';
-import { Ticket, TicketCreateInput } from '../../models/ticket.js';
+import { Ticket } from '../../models/ticket.js';
 import { TicketCategory, Priority, TicketStatus } from '../../models/enums.js';
 
 export interface TicketRow {
@@ -9,6 +9,7 @@ export interface TicketRow {
   category: string;
   priority: string;
   status: string;
+  location: string | null;
   reporter_id: string;
   assignee_id: string | null;
   created_at: Date;
@@ -34,6 +35,7 @@ function mapRowToTicket(row: TicketRow): Ticket {
     category: row.category as TicketCategory,
     priority: row.priority as Priority,
     status: row.status as TicketStatus,
+    location: row.location ?? undefined,
     reporterId: row.reporter_id,
     assigneeId: row.assignee_id ?? undefined,
     createdAt: row.created_at,
@@ -62,14 +64,15 @@ export class TicketRepository {
     category: TicketCategory;
     priority: Priority;
     status: TicketStatus;
+    location?: string;
     reporterId: string;
     createdAt: Date;
     updatedAt: Date;
     dueDate?: Date;
   }): Promise<Ticket> {
     const result = await query<TicketRow>(
-      `INSERT INTO tickets (id, title, description, category, priority, status, reporter_id, created_at, updated_at, due_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO tickets (id, title, description, category, priority, status, location, reporter_id, created_at, updated_at, due_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         ticket.id,
@@ -78,6 +81,7 @@ export class TicketRepository {
         ticket.category,
         ticket.priority,
         ticket.status,
+        ticket.location ?? null,
         ticket.reporterId,
         ticket.createdAt,
         ticket.updatedAt,
@@ -95,6 +99,7 @@ export class TicketRepository {
       category: TicketCategory;
       priority: Priority;
       status: TicketStatus;
+      location: string | null;
       assigneeId: string | null;
       updatedAt: Date;
       resolvedAt: Date | null;
@@ -111,6 +116,7 @@ export class TicketRepository {
       category: 'category',
       priority: 'priority',
       status: 'status',
+      location: 'location',
       assigneeId: 'assignee_id',
       updatedAt: 'updated_at',
       resolvedAt: 'resolved_at',

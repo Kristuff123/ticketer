@@ -1,6 +1,7 @@
 import { NotificationType, TicketStatus, UserRole } from '../models/enums.js';
 import { Notification, NotificationResult } from '../models/notification.js';
 import { INotificationService } from './interfaces/index.js';
+import { EmailService, emailService } from './email-service.js';
 import { UserService, userService } from './user-service.js';
 
 // In-memory notification store: userId -> notifications[]
@@ -25,9 +26,11 @@ export interface NotificationListResult {
 
 export class NotificationService implements INotificationService {
   private userSvc: UserService;
+  private emailSvc: EmailService;
 
-  constructor(userSvc?: UserService) {
+  constructor(userSvc?: UserService, emailSvc?: EmailService) {
     this.userSvc = userSvc ?? userService;
+    this.emailSvc = emailSvc ?? emailService;
   }
 
   async notifyTicketCreated(ticketId: string): Promise<NotificationResult> {
@@ -210,7 +213,7 @@ export class NotificationService implements INotificationService {
 
     // Deliver based on user preferences
     if (user.preferences.emailNotifications) {
-      // Email delivery would happen here (placeholder for now)
+      await this.emailSvc.deliverNotificationEmail(notification, user.email);
     }
 
     if (user.preferences.dashboardNotifications) {

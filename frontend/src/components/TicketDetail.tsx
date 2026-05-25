@@ -9,6 +9,7 @@ import {
   type HistoryEntry,
 } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { STORE_LOCATIONS } from '../data/store-locations';
 
 interface TicketDetailProps {
   ticketId: string;
@@ -55,6 +56,12 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   CLOSED: ['REOPENED'],
   REOPENED: ['IN_PROGRESS'],
 };
+
+function getLocationLabel(location?: string) {
+  if (!location) return 'Nie podano';
+  const store = STORE_LOCATIONS.find((item) => item.code === location);
+  return store ? `${store.code} — ${store.name}` : location;
+}
 
 export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps) {
   const { user } = useAuth();
@@ -193,6 +200,10 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
           <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
             <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Kategoria</span>
             <span className="font-bold text-slate-800 dark:text-slate-100">{ticket.category}</span>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
+            <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Lokalizacja</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">{getLocationLabel(ticket.location)}</span>
           </div>
           <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
             <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Utworzono</span>

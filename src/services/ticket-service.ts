@@ -58,6 +58,7 @@ export class TicketService implements ITicketService {
       category: data.category,
       priority: data.priority,
       status: TicketStatus.NEW,
+      location: data.location?.trim() || undefined,
       reporterId: data.reporterId,
       createdAt: now,
       updatedAt: now,

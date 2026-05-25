@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createTicket } from '../api';
+import { STORE_LOCATIONS } from '../data/store-locations';
 
 interface TicketFormProps {
   onCreated?: () => void;
@@ -23,6 +24,7 @@ const PRIORITIES = [
 export default function TicketForm({ onCreated }: TicketFormProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [location, setLocation] = useState('');
   const [category, setCategory] = useState('SOFTWARE');
   const [priority, setPriority] = useState('MEDIUM');
   const [loading, setLoading] = useState(false);
@@ -36,10 +38,11 @@ export default function TicketForm({ onCreated }: TicketFormProps) {
     setLoading(true);
 
     try {
-      await createTicket({ title, description, category, priority });
+      await createTicket({ title, description, category, priority, location });
       setSuccess('Zgłoszenie zostało utworzone pomyślnie!');
       setTitle('');
       setDescription('');
+      setLocation('');
       setCategory('SOFTWARE');
       setPriority('MEDIUM');
       onCreated?.();
@@ -80,6 +83,23 @@ export default function TicketForm({ onCreated }: TicketFormProps) {
             className="field"
             placeholder="Krótki opis problemu"
           />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">Lokalizacja</label>
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            required
+            className="field"
+          >
+            <option value="">Wybierz sklep lub administrację</option>
+            {STORE_LOCATIONS.map((store) => (
+              <option key={store.code} value={store.code}>
+                {store.code} — {store.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>

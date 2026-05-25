@@ -35,6 +35,14 @@ export function validateTicketInput(data: TicketCreateInput): ValidationResult {
     errors.priority = `Priority must be one of: ${validPriorities.join(', ')}`;
   }
 
+  if (data.location !== undefined) {
+    if (data.location.trim().length === 0) {
+      errors.location = 'Location must contain at least 1 non-whitespace character';
+    } else if (data.location.length > 200) {
+      errors.location = 'Location must not exceed 200 characters';
+    }
+  }
+
   return {
     isValid: Object.keys(errors).length === 0,
     errors,

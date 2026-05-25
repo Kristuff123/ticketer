@@ -22,13 +22,14 @@ export function createTicketRoutes(ticketService: TicketService): Router {
     '/',
     async (req: AuthenticatedRequest, res: Response): Promise<void> => {
       const user = req.user!;
-      const { title, description, category, priority } = req.body;
+      const { title, description, category, priority, location } = req.body;
 
       const result = await ticketService.createTicket({
         title,
         description,
         category,
         priority,
+        location,
         reporterId: user.userId,
       });
 
