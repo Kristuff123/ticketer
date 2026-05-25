@@ -1,7 +1,7 @@
-import { NotificationType, TicketStatus, UserRole } from '../models/enums';
-import { Notification, NotificationResult } from '../models/notification';
-import { INotificationService } from './interfaces';
-import { UserService, userService } from './user-service';
+import { NotificationType, TicketStatus, UserRole } from '../models/enums.js';
+import { Notification, NotificationResult } from '../models/notification.js';
+import { INotificationService } from './interfaces/index.js';
+import { UserService, userService } from './user-service.js';
 
 // In-memory notification store: userId -> notifications[]
 const notificationStore: Map<string, Notification[]> = new Map();

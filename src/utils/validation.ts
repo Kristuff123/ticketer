@@ -1,5 +1,5 @@
-import { TicketCategory, Priority } from '../models';
-import { TicketCreateInput } from '../models';
+import { TicketCategory, Priority } from '../models/index.js';
+import { TicketCreateInput } from '../models/index.js';
 
 export interface ValidationResult {
   isValid: boolean;

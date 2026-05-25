@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { sortTickets } from './queue-service';
-import { Ticket } from '../models/ticket';
-import { Priority, TicketStatus, TicketCategory } from '../models/enums';
+import { sortTickets } from './queue-service.js';
+import { Ticket } from '../models/ticket.js';
+import { Priority, TicketStatus, TicketCategory } from '../models/enums.js';
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {

@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { TicketStatus } from '../models';
+import { TicketStatus } from '../models/index.js';
 import {
   validateStatusTransition,
   getAllowedTransitions,
   TRANSITION_MAP,
-} from '../utils/status-transitions';
+} from '../utils/status-transitions.js';
 
 /**
  * Property 1: Valid Status Transitions

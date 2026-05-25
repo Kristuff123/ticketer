@@ -1,13 +1,13 @@
 import express from 'express';
-import { authenticate } from './middleware/auth';
-import { UserService, userService } from './services/user-service';
-import { TicketService } from './services/ticket-service';
-import { QueueService } from './services/queue-service';
-import { NotificationService, notificationService } from './services/notification-service';
-import { createTicketRoutes } from './routes/tickets';
-import { createQueueRoutes } from './routes/queue';
-import { createNotificationRoutes } from './routes/notifications';
-import { createAuthRoutes } from './routes/auth';
+import { authenticate } from './middleware/auth.js';
+import { UserService, userService } from './services/user-service.js';
+import { TicketService } from './services/ticket-service.js';
+import { QueueService } from './services/queue-service.js';
+import { NotificationService, notificationService } from './services/notification-service.js';
+import { createTicketRoutes } from './routes/tickets.js';
+import { createQueueRoutes } from './routes/queue.js';
+import { createNotificationRoutes } from './routes/notifications.js';
+import { createAuthRoutes } from './routes/auth.js';
 
 // Create Express app
 const app = express();

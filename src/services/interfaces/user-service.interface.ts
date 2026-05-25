@@ -1,5 +1,5 @@
-import { UserRole } from '../../models/enums';
-import { User, UserPreferences, Credentials, AuthResult } from '../../models/user';
+import { UserRole } from '../../models/enums.js';
+import { User, UserPreferences, Credentials, AuthResult } from '../../models/user.js';
 
 export interface IUserService {
   getUser(id: string): Promise<User | null>;

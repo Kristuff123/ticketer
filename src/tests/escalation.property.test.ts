@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { QueueService, getNextPriority } from '../services/queue-service';
-import { Ticket } from '../models/ticket';
-import { Priority, TicketStatus, TicketCategory, HistoryActionType } from '../models/enums';
+import { QueueService, getNextPriority } from '../services/queue-service.js';
+import { Ticket } from '../models/ticket.js';
+import { Priority, TicketStatus, TicketCategory, HistoryActionType } from '../models/enums.js';
 import crypto from 'node:crypto';
 
 /**

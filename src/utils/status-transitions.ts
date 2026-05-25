@@ -1,4 +1,4 @@
-import { TicketStatus } from '../models';
+import { TicketStatus } from '../models/index.js';
 
 /**
  * Defines all valid status transitions in the ticket lifecycle state machine.

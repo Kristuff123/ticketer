@@ -5,10 +5,10 @@ export {
   getCache,
   setCache,
   deleteCache,
-} from './redis-client';
+} from './redis-client.js';
 
 export {
   getCachedQueueResults,
   setCachedQueueResults,
   invalidateQueueCache,
-} from './queue-cache';
+} from './queue-cache.js';

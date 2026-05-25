@@ -1,8 +1,8 @@
-import { Ticket, TicketResult } from '../models/ticket';
-import { Priority, TicketStatus, HistoryActionType } from '../models/enums';
-import { QueueFilters, QueueStats, TicketListResult } from '../models/queue';
-import { IQueueService } from './interfaces/queue-service.interface';
-import { createHistoryEntry } from '../utils/history';
+import { Ticket, TicketResult } from '../models/ticket.js';
+import { Priority, TicketStatus, HistoryActionType } from '../models/enums.js';
+import { QueueFilters, QueueStats, TicketListResult } from '../models/queue.js';
+import { IQueueService } from './interfaces/queue-service.interface.js';
+import { createHistoryEntry } from '../utils/history.js';
 
 /**
  * Priority numeric values for sorting.

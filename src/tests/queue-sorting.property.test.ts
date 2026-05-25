@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { sortTickets } from '../services/queue-service';
-import { Priority, TicketCategory, TicketStatus } from '../models/enums';
-import { Ticket } from '../models/ticket';
+import { sortTickets } from '../services/queue-service.js';
+import { Priority, TicketCategory, TicketStatus } from '../models/enums.js';
+import { Ticket } from '../models/ticket.js';
 
 /**
  * Property 7: Queue Sorting Correctness

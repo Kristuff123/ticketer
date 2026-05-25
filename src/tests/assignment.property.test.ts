@@ -7,10 +7,10 @@ import {
   UserRole,
   Ticket,
   User,
-} from '../models';
-import { TicketService } from '../services/ticket-service';
-import { INotificationService } from '../services/interfaces/notification-service.interface';
-import { IUserService } from '../services/interfaces/user-service.interface';
+} from '../models/index.js';
+import { TicketService } from '../services/ticket-service.js';
+import { INotificationService } from '../services/interfaces/notification-service.interface.js';
+import { IUserService } from '../services/interfaces/user-service.interface.js';
 
 /**
  * Property 4: Assignment Role Enforcement

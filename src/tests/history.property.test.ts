@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { HistoryActionType } from '../models';
-import { createHistoryEntry, getTicketHistory } from '../utils/history';
+import { HistoryActionType } from '../models/index.js';
+import { createHistoryEntry, getTicketHistory } from '../utils/history.js';
 
 /**
  * Property 5: History Audit Trail Integrity

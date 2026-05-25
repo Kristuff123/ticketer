@@ -1,5 +1,5 @@
-import { TicketStatus } from '../../models/enums';
-import { NotificationResult } from '../../models/notification';
+import { TicketStatus } from '../../models/enums.js';
+import { NotificationResult } from '../../models/notification.js';
 
 export interface INotificationService {
   notifyTicketCreated(ticketId: string): Promise<NotificationResult>;

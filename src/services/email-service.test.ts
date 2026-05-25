@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { EmailService, delay } from './email-service';
-import { Notification } from '../models/notification';
-import { NotificationType } from '../models/enums';
+import { EmailService, delay } from './email-service.js';
+import { Notification } from '../models/notification.js';
+import { NotificationType } from '../models/enums.js';
 
 describe('EmailService', () => {
   describe('delay', () => {

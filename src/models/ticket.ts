@@ -1,6 +1,6 @@
-import { TicketCategory, Priority, TicketStatus } from './enums';
-import { Comment } from './comment';
-import { TicketHistoryEntry } from './history';
+import { TicketCategory, Priority, TicketStatus } from './enums.js';
+import { Comment } from './comment.js';
+import { TicketHistoryEntry } from './history.js';
 
 export interface Ticket {
   id: string;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { UserService, TicketLookupFn } from '../services/user-service';
-import { UserRole } from '../models';
+import { UserService, TicketLookupFn } from '../services/user-service.js';
+import { UserRole } from '../models/index.js';
 
 /**
  * Property 10: Permission Enforcement

@@ -1,5 +1,5 @@
 import nodemailer, { Transporter } from 'nodemailer';
-import { Notification } from '../models/notification';
+import { Notification } from '../models/notification.js';
 
 /**
  * Helper: delay for a given number of milliseconds.

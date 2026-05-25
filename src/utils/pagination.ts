@@ -1,4 +1,4 @@
-import { ValidationResult } from './validation';
+import { ValidationResult } from './validation.js';
 
 export interface PaginationParams {
   page?: number;

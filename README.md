@@ -4,7 +4,7 @@ System zarządzania zgłoszeniami IT z prostym interfejsem dla zgłaszających i
 
 ## Stack
 
-- **Backend**: Node.js 22 + Express 5 + TypeScript (uruchamiany przez `tsx`)
+- **Backend**: Node.js 22 + Express 5 + TypeScript
 - **Frontend**: React 19 + Vite + Tailwind CSS 4 + React Router
 - **Auth**: JWT (15 min token expiration)
 - **Storage**: in-memory (PostgreSQL i Redis przygotowane w `src/database/` i `src/cache/`, ale nie podłączone)
@@ -84,7 +84,7 @@ npm test
 │   │   ├── context/        AuthContext
 │   │   └── api.ts          Klient HTTP
 │   └── nginx.conf          Nginx + proxy /api → backend
-├── Dockerfile              Backend (Node 22 + tsx)
+├── Dockerfile              Backend (multi-stage TypeScript → Node)
 ├── frontend/Dockerfile     Frontend (multi-stage Vite + Nginx)
 └── docker-compose.yml      Orchestracja
 ```
@@ -94,3 +94,5 @@ npm test
 - `PORT` (domyślnie 3000) — port backendu
 - `JWT_SECRET` — sekret JWT (zmień w produkcji)
 - `NODE_ENV` — `production` w Dockerze, `development` lokalnie
+
+Skopiuj `.env.example` do `.env` dla lokalnych ustawień środowiska.

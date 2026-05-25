@@ -1,8 +1,8 @@
 import { Router, Response } from 'express';
-import { AuthenticatedRequest } from '../middleware/auth';
-import { requirePermission } from '../middleware/permissions';
-import { TicketService } from '../services/ticket-service';
-import { TicketStatus } from '../models/enums';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
+import { TicketService } from '../services/ticket-service.js';
+import { TicketStatus } from '../models/enums.js';
 
 export function createTicketRoutes(ticketService: TicketService): Router {
   const router = Router();
