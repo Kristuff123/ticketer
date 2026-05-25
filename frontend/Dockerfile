@@ -1,0 +1,27 @@
+# Frontend Dockerfile (multi-stage)
+
+# --- Build stage ---
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source and build
+COPY . .
+RUN npm run build
+
+# --- Runtime stage (Nginx) ---
+FROM nginx:1.27-alpine AS runtime
+
+# Copy custom Nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built static files
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
