@@ -27,6 +27,36 @@ export function createAuthRoutes(userServiceInstance: UserService): Router {
     }
   );
 
+  // POST /auth/register — create a reporter account (in-memory stage)
+  router.post(
+    '/register',
+    async (req: Request, res: Response): Promise<void> => {
+      const { email, password, name, department } = req.body;
+
+      if (!email || !password || !name || !department) {
+        res.status(400).json({
+          error: 'VALIDATION_ERROR',
+          message: 'email, password, name and department are required',
+        });
+        return;
+      }
+
+      const result = await userServiceInstance.registerUser({
+        email,
+        password,
+        name,
+        department,
+      });
+
+      if (!result.success) {
+        res.status(400).json({ error: 'REGISTRATION_FAILED', message: result.error });
+        return;
+      }
+
+      res.status(201).json({ token: result.token, user: result.user });
+    }
+  );
+
   // POST /auth/refresh — refresh token (authenticated)
   router.post(
     '/refresh',

@@ -68,37 +68,45 @@ export class NotificationService implements INotificationService {
     return { success: true, notification };
   }
 
-  async notifyStatusChanged(ticketId: string, newStatus: TicketStatus): Promise<NotificationResult> {
-    const notification = this.createNotification(
-      'system',
+  async notifyStatusChanged(
+    ticketId: string,
+    newStatus: TicketStatus,
+    recipientIds: string[] = []
+  ): Promise<NotificationResult> {
+    return this.notifyRecipients(
+      recipientIds,
       NotificationType.STATUS_CHANGED,
       'Ticket status changed',
       `Ticket ${ticketId} status changed to ${newStatus}.`,
       ticketId
     );
-    return { success: true, notification };
   }
 
-  async notifyCommentAdded(ticketId: string, commentId: string): Promise<NotificationResult> {
-    const notification = this.createNotification(
-      'system',
+  async notifyCommentAdded(
+    ticketId: string,
+    commentId: string,
+    recipientIds: string[] = []
+  ): Promise<NotificationResult> {
+    return this.notifyRecipients(
+      recipientIds,
       NotificationType.COMMENT_ADDED,
       'New comment added',
-      `A new comment has been added to ticket ${ticketId}.`,
+      `A new comment ${commentId} has been added to ticket ${ticketId}.`,
       ticketId
     );
-    return { success: true, notification };
   }
 
-  async notifyTicketResolved(ticketId: string): Promise<NotificationResult> {
-    const notification = this.createNotification(
-      'system',
+  async notifyTicketResolved(
+    ticketId: string,
+    recipientIds: string[] = []
+  ): Promise<NotificationResult> {
+    return this.notifyRecipients(
+      recipientIds,
       NotificationType.TICKET_RESOLVED,
       'Ticket resolved',
       `Ticket ${ticketId} has been resolved.`,
       ticketId
     );
-    return { success: true, notification };
   }
 
   async notifyEscalation(ticketId: string, reason: string): Promise<NotificationResult> {
@@ -182,6 +190,29 @@ export class NotificationService implements INotificationService {
   }
 
   // --- Internal helpers ---
+
+  private async notifyRecipients(
+    recipientIds: string[],
+    type: NotificationType,
+    title: string,
+    message: string,
+    ticketId?: string
+  ): Promise<NotificationResult> {
+    const uniqueRecipientIds = Array.from(new Set(recipientIds.filter(Boolean)));
+    let lastNotification: Notification | null = null;
+
+    for (const recipientId of uniqueRecipientIds) {
+      const notification = this.createNotification(recipientId, type, title, message, ticketId);
+      lastNotification = notification;
+      await this.deliverNotification(notification, recipientId);
+    }
+
+    if (lastNotification) {
+      return { success: true, notification: lastNotification };
+    }
+
+    return { success: false, error: 'No recipients to notify' };
+  }
 
   private createNotification(
     userId: string,

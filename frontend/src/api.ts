@@ -60,6 +60,18 @@ export function login(email: string, password: string) {
   });
 }
 
+export function register(data: {
+  email: string;
+  password: string;
+  name: string;
+  department: string;
+}) {
+  return request<{ token: string; user: User }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 // List tickets for current user
 export async function listMyTickets(): Promise<Ticket[]> {
   const response = await request<any>('/tickets');
@@ -114,7 +126,7 @@ export function getTicketHistory(id: string) {
 export async function getQueue(params: {
   priority?: string;
   category?: string;
-  sortBy?: string;
+  sortBy?: 'priority' | 'createdAt' | 'updatedAt' | 'dueDate';
   page?: number;
   pageSize?: number;
 }): Promise<QueueResponse> {
@@ -177,12 +189,49 @@ export function markNotificationRead(id: string) {
   });
 }
 
+// Users
+export async function getUsers(): Promise<User[]> {
+  const response = await request<{ users?: User[] }>('/users');
+  return response.users ?? [];
+}
+
+export async function getAssignableUsers(): Promise<User[]> {
+  const response = await request<{ users?: User[] }>('/users/assignable');
+  return response.users ?? [];
+}
+
+export function createUser(data: {
+  email: string;
+  password: string;
+  name: string;
+  department: string;
+  role: User['role'];
+}) {
+  return request<User>('/users', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateUser(
+  id: string,
+  data: Partial<Pick<User, 'name' | 'department' | 'role' | 'isActive'>>
+) {
+  return request<User>(`/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 // Types
 export interface User {
   id: string;
   email: string;
   name: string;
   role: 'ADMIN' | 'TECHNICIAN' | 'REPORTER';
+  department: string;
+  isActive: boolean;
+  createdAt: string;
 }
 
 export interface Ticket {

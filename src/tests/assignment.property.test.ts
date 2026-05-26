@@ -64,6 +64,7 @@ function createMockUserService(usersMap: Map<string, User>): IUserService {
     getUserByRole: async (role: UserRole) =>
       Array.from(usersMap.values()).filter((u) => u.role === role),
     authenticateUser: async () => ({ success: false as const, error: 'Not implemented' }),
+    registerUser: async () => ({ success: false as const, error: 'Not implemented' }),
     hasPermission: async () => true,
     updateUserPreferences: async () => null,
   };

@@ -6,15 +6,20 @@ export interface QueueFilters {
   category?: TicketCategory;
   assigneeId?: string;
   status?: TicketStatus;
-  sortBy?: 'priority' | 'createdAt' | 'dueDate';
+  sortBy?: 'priority' | 'createdAt' | 'updatedAt' | 'dueDate';
   sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }
 
 export interface QueueStats {
+  totalTickets: number;
+  openTickets: number;
+  resolvedTickets: number;
   slaCompliancePercentage: number;
   averageTimeToFirstResponse: number;
+  byPriority: Partial<Record<Priority, number>>;
+  byStatus: Partial<Record<TicketStatus, number>>;
 }
 
 export interface TicketListResult {

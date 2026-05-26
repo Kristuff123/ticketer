@@ -87,6 +87,39 @@ describe('UserService', () => {
     });
   });
 
+  describe('registerUser', () => {
+    it('should create a reporter account and return a token', async () => {
+      const email = `new-user-${Date.now()}@example.com`;
+
+      const result = await service.registerUser({
+        email,
+        password: 'securePass123',
+        name: 'New User',
+        department: 'Operations',
+      });
+
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.user.email).toBe(email);
+      expect(result.user.role).toBe(UserRole.REPORTER);
+      expect(result.token).toBeDefined();
+    });
+
+    it('should reject duplicate emails', async () => {
+      const result = await service.registerUser({
+        email: 'admin@company.com',
+        password: 'securePass123',
+        name: 'Duplicate User',
+        department: 'Operations',
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('already exists');
+      }
+    });
+  });
+
   describe('hasPermission', () => {
     describe('ADMIN role', () => {
       it('should always return true for admin', async () => {

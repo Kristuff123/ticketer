@@ -33,6 +33,26 @@ export class TicketService implements ITicketService {
     this.userService = userService;
   }
 
+  private getNotificationRecipients(
+    ticket: Ticket,
+    options: { includeReporter?: boolean; excludeUserId?: string } = {}
+  ): string[] {
+    const includeReporter = options.includeReporter ?? true;
+    const recipients = new Set<string>();
+
+    if (includeReporter) {
+      recipients.add(ticket.reporterId);
+    }
+    if (ticket.assigneeId) {
+      recipients.add(ticket.assigneeId);
+    }
+    if (options.excludeUserId) {
+      recipients.delete(options.excludeUserId);
+    }
+
+    return Array.from(recipients);
+  }
+
   async createTicket(data: TicketCreateInput): Promise<TicketResult> {
     // Validate input
     const validation = validateTicketInput(data);
@@ -202,10 +222,11 @@ export class TicketService implements ITicketService {
     ticket.updatedAt = new Date();
 
     // Step 8: Trigger notifications
+    const recipientIds = this.getNotificationRecipients(ticket, { excludeUserId: userId });
     if (status === TicketStatus.RESOLVED) {
-      await this.notificationService.notifyTicketResolved(ticket.id);
+      await this.notificationService.notifyTicketResolved(ticket.id, recipientIds);
     } else {
-      await this.notificationService.notifyStatusChanged(ticket.id, status);
+      await this.notificationService.notifyStatusChanged(ticket.id, status, recipientIds);
     }
 
     // Step 9: Return success
@@ -252,7 +273,14 @@ export class TicketService implements ITicketService {
 
     // 7. Trigger notifications
     try {
-      await this.notificationService.notifyCommentAdded(id, newComment.id);
+      await this.notificationService.notifyCommentAdded(
+        id,
+        newComment.id,
+        this.getNotificationRecipients(ticket, {
+          excludeUserId: userId,
+          includeReporter: !newComment.isInternal,
+        })
+      );
     } catch {
       // Notification failure should not block comment creation
     }
@@ -273,8 +301,8 @@ export class TicketService implements ITicketService {
       // Admin sees everything
       filtered = allTickets;
     } else if (user.role === UserRole.TECHNICIAN) {
-      // Technician sees tickets assigned to them
-      filtered = allTickets.filter((t) => t.assigneeId === userId);
+      // Technician can view the operational queue, but write actions are still assignment-gated.
+      filtered = allTickets;
     } else {
       // Reporter sees only own tickets
       filtered = allTickets.filter((t) => t.reporterId === userId);

@@ -3,17 +3,21 @@ import Navbar from '../components/Navbar';
 import TicketList from '../components/TicketList';
 import TicketDetail from '../components/TicketDetail';
 import QueueStats from '../components/QueueStats';
+import UserManagement from '../components/UserManagement';
 import { getQueue, type Ticket, type QueueResponse } from '../api';
+import { useAuth } from '../context/AuthContext';
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
   const [queueData, setQueueData] = useState<QueueResponse | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<'queue' | 'users'>('queue');
 
   // Filters
   const [priority, setPriority] = useState('');
   const [category, setCategory] = useState('');
-  const [sortBy, setSortBy] = useState('');
+  const [sortBy, setSortBy] = useState<'' | 'priority' | 'createdAt' | 'updatedAt' | 'dueDate'>('');
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -95,7 +99,7 @@ export default function AdminDashboard() {
               <select
                 value={sortBy}
                 onChange={(e) => {
-                  setSortBy(e.target.value);
+                  setSortBy(e.target.value as typeof sortBy);
                   handleFilterChange();
                 }}
                 className="field text-sm"
@@ -125,17 +129,48 @@ export default function AdminDashboard() {
         <main className="min-w-0 flex-1">
           <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div>
-              <h1 className="text-3xl font-black text-slate-950 dark:text-white">Kolejka obsługi</h1>
+              <h1 className="text-3xl font-black text-slate-950 dark:text-white">
+                {activeView === 'queue' ? 'Kolejka obsługi' : 'Zarządzanie użytkownikami'}
+              </h1>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Priorytety, statusy i szczegóły zgłoszeń dla zespołu IT.
+                {activeView === 'queue'
+                  ? 'Priorytety, statusy i szczegóły zgłoszeń dla zespołu IT.'
+                  : 'Role, dostęp i konta zespołu oraz zgłaszających.'}
               </p>
             </div>
-            {queueData && (
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-                {queueData.total} zgłoszeń w widoku
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {user?.role === 'ADMIN' && (
+                <>
+                  <button
+                    onClick={() => setActiveView('queue')}
+                    className={`secondary-button px-3 py-2 text-sm ${
+                      activeView === 'queue' ? 'border-blue-300 text-blue-700 dark:text-blue-200' : ''
+                    }`}
+                  >
+                    Kolejka
+                  </button>
+                  <button
+                    onClick={() => setActiveView('users')}
+                    className={`secondary-button px-3 py-2 text-sm ${
+                      activeView === 'users' ? 'border-blue-300 text-blue-700 dark:text-blue-200' : ''
+                    }`}
+                  >
+                    Użytkownicy
+                  </button>
+                </>
+              )}
+              {activeView === 'queue' && queueData && (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                  {queueData.total} zgłoszeń w widoku
+                </div>
+              )}
+            </div>
           </div>
+
+          {activeView === 'users' ? (
+            <UserManagement />
+          ) : (
+            <>
 
           {/* Stats */}
           <div className="mb-6">
@@ -259,6 +294,8 @@ export default function AdminDashboard() {
               )}
             </div>
           </div>
+            </>
+          )}
         </main>
       </div>
     </div>

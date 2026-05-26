@@ -22,6 +22,7 @@ const PRIORITY_ORDER: Record<Priority, number> = {
  * - If no sortBy specified: sort by priority DESC then createdAt ASC
  * - If sortBy='priority': default direction is DESC (CRITICAL first)
  * - If sortBy='createdAt': default direction is ASC (oldest first)
+ * - If sortBy='updatedAt': default direction is DESC (most recently updated first)
  * - If sortBy='dueDate': default direction is ASC (soonest first)
  * - If explicit sortOrder is provided, use that direction regardless of field
  */
@@ -48,6 +49,7 @@ export function sortTickets(
   const defaultDirections: Record<string, 'asc' | 'desc'> = {
     priority: 'desc',
     createdAt: 'asc',
+    updatedAt: 'desc',
     dueDate: 'asc',
   };
 
@@ -68,6 +70,11 @@ export function sortTickets(
       case 'createdAt': {
         const aTime = a.createdAt.getTime();
         const bTime = b.createdAt.getTime();
+        return (aTime - bTime) * multiplier;
+      }
+      case 'updatedAt': {
+        const aTime = a.updatedAt.getTime();
+        const bTime = b.updatedAt.getTime();
         return (aTime - bTime) * multiplier;
       }
       case 'dueDate': {
@@ -151,11 +158,24 @@ export class QueueService implements IQueueService {
   async getQueueStatistics(): Promise<QueueStats> {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const openStatuses = new Set<TicketStatus>([
+      TicketStatus.NEW,
+      TicketStatus.IN_PROGRESS,
+      TicketStatus.WAITING_FOR_INFO,
+      TicketStatus.REOPENED,
+    ]);
 
     // Filter to tickets created in the last 30 days
     const recentTickets = this.tickets.filter(
       (t) => t.createdAt.getTime() >= thirtyDaysAgo.getTime()
     );
+    const byPriority: Partial<Record<Priority, number>> = {};
+    const byStatus: Partial<Record<TicketStatus, number>> = {};
+
+    for (const ticket of recentTickets) {
+      byPriority[ticket.priority] = (byPriority[ticket.priority] ?? 0) + 1;
+      byStatus[ticket.status] = (byStatus[ticket.status] ?? 0) + 1;
+    }
 
     // Calculate SLA compliance percentage
     const resolvedTickets = recentTickets.filter((t) => t.resolvedAt != null);
@@ -170,14 +190,15 @@ export class QueueService implements IQueueService {
       slaCompliancePercentage = (compliantTickets.length / resolvedTickets.length) * 100;
     }
 
-    // Calculate average time to first IN_PROGRESS status change
+    // Calculate average time to first technician response.
     const timesToFirstResponse: number[] = [];
 
     for (const ticket of recentTickets) {
       const firstInProgress = ticket.history.find(
         (entry) =>
-          entry.action === HistoryActionType.STATUS_CHANGED &&
-          entry.newValue === TicketStatus.IN_PROGRESS
+          entry.action === HistoryActionType.ASSIGNED ||
+          (entry.action === HistoryActionType.STATUS_CHANGED &&
+            entry.newValue === TicketStatus.IN_PROGRESS)
       );
 
       if (firstInProgress) {
@@ -192,8 +213,15 @@ export class QueueService implements IQueueService {
         : 0;
 
     return {
+      totalTickets: recentTickets.length,
+      openTickets: recentTickets.filter((ticket) => openStatuses.has(ticket.status)).length,
+      resolvedTickets: recentTickets.filter(
+        (ticket) => ticket.status === TicketStatus.RESOLVED || ticket.status === TicketStatus.CLOSED
+      ).length,
       slaCompliancePercentage,
       averageTimeToFirstResponse,
+      byPriority,
+      byStatus,
     };
   }
 

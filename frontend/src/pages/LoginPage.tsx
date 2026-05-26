@@ -3,11 +3,20 @@ import { useAuth } from '../context/AuthContext';
 import ThemeToggle from '../components/ThemeToggle';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [department, setDepartment] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const demoAccounts = [
+    { label: 'Admin', email: 'admin@company.com', password: 'admin123' },
+    { label: 'Technik', email: 'technician@company.com', password: 'tech123' },
+    { label: 'Zgłaszający', email: 'reporter@company.com', password: 'reporter123' },
+  ];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -15,12 +24,23 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await login(email, password);
+      if (mode === 'login') {
+        await login(email, password);
+      } else {
+        await register({ email, password, name, department });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Błąd logowania');
+      setError(err instanceof Error ? err.message : 'Nie udało się wykonać operacji');
     } finally {
       setLoading(false);
     }
+  }
+
+  function fillDemo(email: string, password: string) {
+    setMode('login');
+    setEmail(email);
+    setPassword(password);
+    setError('');
   }
 
   return (
@@ -72,9 +92,13 @@ export default function LoginPage() {
                   </div>
                   <ThemeToggle compact />
                 </div>
-                <h1 className="text-3xl font-black text-slate-950 dark:text-white">Zaloguj się</h1>
+                <h1 className="text-3xl font-black text-slate-950 dark:text-white">
+                  {mode === 'login' ? 'Zaloguj się' : 'Utwórz konto'}
+                </h1>
                 <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                  Wejdź do panelu obsługi zgłoszeń Ticketer.
+                  {mode === 'login'
+                    ? 'Wejdź do panelu obsługi zgłoszeń Ticketer.'
+                    : 'Rejestracja tworzy konto zgłaszającego na obecnym etapie in-memory.'}
                 </p>
               </div>
 
@@ -85,6 +109,42 @@ export default function LoginPage() {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
+                {mode === 'register' && (
+                  <>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">
+                        Imię i nazwisko
+                      </label>
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                        minLength={2}
+                        maxLength={100}
+                        className="field"
+                        placeholder="Jan Kowalski"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">
+                        Dział
+                      </label>
+                      <input
+                        type="text"
+                        value={department}
+                        onChange={(e) => setDepartment(e.target.value)}
+                        required
+                        minLength={2}
+                        maxLength={100}
+                        className="field"
+                        placeholder="Sprzedaż"
+                      />
+                    </div>
+                  </>
+                )}
+
                 <div>
                   <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">
                     Email
@@ -108,6 +168,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    minLength={mode === 'register' ? 8 : undefined}
                     className="field"
                     placeholder="••••••••"
                   />
@@ -118,25 +179,39 @@ export default function LoginPage() {
                   disabled={loading}
                   className="primary-button w-full px-4 py-3 disabled:opacity-50"
                 >
-                  {loading ? 'Logowanie...' : 'Zaloguj się'}
+                  {loading
+                    ? mode === 'login' ? 'Logowanie...' : 'Tworzenie konta...'
+                    : mode === 'login' ? 'Zaloguj się' : 'Zarejestruj się'}
                 </button>
               </form>
 
+              <button
+                type="button"
+                onClick={() => {
+                  setMode((current) => (current === 'login' ? 'register' : 'login'));
+                  setError('');
+                }}
+                className="mt-4 w-full text-center text-sm font-bold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              >
+                {mode === 'login' ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'}
+              </button>
+
               <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/70">
-                <p className="mb-3 text-xs font-black uppercase text-slate-400 dark:text-slate-500">Konta testowe</p>
-                <div className="space-y-2 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                  <p>
-                    <span className="font-bold text-slate-800 dark:text-slate-100">Admin:</span> admin@company.com /
-                    admin123
-                  </p>
-                  <p>
-                    <span className="font-bold text-slate-800 dark:text-slate-100">Technik:</span>{' '}
-                    technician@company.com / tech123
-                  </p>
-                  <p>
-                    <span className="font-bold text-slate-800 dark:text-slate-100">Zgłaszający:</span>{' '}
-                    reporter@company.com / reporter123
-                  </p>
+                <p className="mb-3 text-xs font-black uppercase text-slate-400 dark:text-slate-500">
+                  Wbudowane konta
+                </p>
+                <div className="grid gap-2">
+                  {demoAccounts.map((account) => (
+                    <button
+                      key={account.email}
+                      type="button"
+                      onClick={() => fillDemo(account.email, account.password)}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-blue-900 dark:hover:bg-blue-950/40 dark:hover:text-blue-200"
+                    >
+                      <span className="font-black text-slate-800 dark:text-slate-100">{account.label}:</span>{' '}
+                      {account.email} / {account.password}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

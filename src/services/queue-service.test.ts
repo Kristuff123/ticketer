@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTickets } from './queue-service.js';
+import { QueueService, sortTickets } from './queue-service.js';
 import { Ticket } from '../models/ticket.js';
 import { Priority, TicketStatus, TicketCategory } from '../models/enums.js';
 
@@ -148,5 +148,38 @@ describe('sortTickets', () => {
 
       expect(result.map((t) => t.id)).toEqual(['2', '3', '1']);
     });
+  });
+
+  describe('sort by updatedAt', () => {
+    it('defaults to DESC (most recently updated first)', () => {
+      const tickets: Ticket[] = [
+        makeTicket({ id: '1', updatedAt: new Date('2024-01-01') }),
+        makeTicket({ id: '2', updatedAt: new Date('2024-03-01') }),
+        makeTicket({ id: '3', updatedAt: new Date('2024-02-01') }),
+      ];
+
+      const result = sortTickets(tickets, 'updatedAt');
+
+      expect(result.map((t) => t.id)).toEqual(['2', '3', '1']);
+    });
+  });
+});
+
+describe('QueueService statistics', () => {
+  it('returns dashboard totals and grouped counts', async () => {
+    const tickets: Ticket[] = [
+      makeTicket({ id: '1', priority: Priority.HIGH, status: TicketStatus.NEW }),
+      makeTicket({ id: '2', priority: Priority.HIGH, status: TicketStatus.RESOLVED, resolvedAt: new Date() }),
+      makeTicket({ id: '3', priority: Priority.LOW, status: TicketStatus.CLOSED, resolvedAt: new Date() }),
+    ];
+    const service = new QueueService(tickets);
+
+    const stats = await service.getQueueStatistics();
+
+    expect(stats.totalTickets).toBe(3);
+    expect(stats.openTickets).toBe(1);
+    expect(stats.resolvedTickets).toBe(2);
+    expect(stats.byPriority[Priority.HIGH]).toBe(2);
+    expect(stats.byStatus[TicketStatus.CLOSED]).toBe(1);
   });
 });

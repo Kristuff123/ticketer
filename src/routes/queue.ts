@@ -11,7 +11,7 @@ export function createQueueRoutes(queueService: QueueService): Router {
   // GET /queue — get pending tickets with filters
   router.get(
     '/',
-    requireRole(UserRole.ADMIN),
+    requireRole(UserRole.ADMIN, UserRole.TECHNICIAN),
     async (req: AuthenticatedRequest, res: Response): Promise<void> => {
       const { priority, category, assigneeId, status, sortBy, sortOrder, page, pageSize } = req.query;
 
@@ -29,8 +29,8 @@ export function createQueueRoutes(queueService: QueueService): Router {
       if (status && Object.values(TicketStatus).includes(status as TicketStatus)) {
         filters.status = status as TicketStatus;
       }
-      if (sortBy && ['priority', 'createdAt', 'dueDate'].includes(sortBy as string)) {
-        filters.sortBy = sortBy as 'priority' | 'createdAt' | 'dueDate';
+      if (sortBy && ['priority', 'createdAt', 'updatedAt', 'dueDate'].includes(sortBy as string)) {
+        filters.sortBy = sortBy as 'priority' | 'createdAt' | 'updatedAt' | 'dueDate';
       }
       if (sortOrder && ['asc', 'desc'].includes(sortOrder as string)) {
         filters.sortOrder = sortOrder as 'asc' | 'desc';
@@ -63,7 +63,7 @@ export function createQueueRoutes(queueService: QueueService): Router {
   // GET /queue/statistics — get queue stats
   router.get(
     '/statistics',
-    requireRole(UserRole.ADMIN),
+    requireRole(UserRole.ADMIN, UserRole.TECHNICIAN),
     async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
       const stats = await queueService.getQueueStatistics();
       res.status(200).json(stats);

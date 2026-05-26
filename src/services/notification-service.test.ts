@@ -37,4 +37,38 @@ describe('NotificationService email delivery', () => {
     expect(result.success).toBe(true);
     expect(NotificationService.getStore('tech-001')).toHaveLength(1);
   });
+
+  it('should persist status change notifications for supplied recipients', async () => {
+    const emailService = {
+      deliverNotificationEmail: vi.fn().mockResolvedValue(true),
+    };
+    const notificationService = new NotificationService(userService, emailService as any);
+
+    const result = await notificationService.notifyStatusChanged(
+      'ticket-003',
+      'IN_PROGRESS' as any,
+      ['reporter-001', 'tech-001']
+    );
+
+    expect(result.success).toBe(true);
+    expect(NotificationService.getStore('reporter-001')).toHaveLength(1);
+    expect(NotificationService.getStore('tech-001')).toHaveLength(1);
+  });
+
+  it('should persist comment notifications only for supplied recipients', async () => {
+    const emailService = {
+      deliverNotificationEmail: vi.fn().mockResolvedValue(true),
+    };
+    const notificationService = new NotificationService(userService, emailService as any);
+
+    const result = await notificationService.notifyCommentAdded(
+      'ticket-004',
+      'comment-001',
+      ['tech-001']
+    );
+
+    expect(result.success).toBe(true);
+    expect(NotificationService.getStore('tech-001')).toHaveLength(1);
+    expect(NotificationService.getStore('reporter-001')).toHaveLength(0);
+  });
 });

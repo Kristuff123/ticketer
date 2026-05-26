@@ -2,7 +2,33 @@ import { Router, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { TicketService } from '../services/ticket-service.js';
-import { TicketStatus } from '../models/enums.js';
+import { TicketStatus, UserRole } from '../models/enums.js';
+import { Ticket } from '../models/ticket.js';
+
+type AuthenticatedUser = NonNullable<AuthenticatedRequest['user']>;
+
+function serializeTicketForUser(ticket: Ticket, user: AuthenticatedUser): Ticket {
+  if (user.role !== UserRole.REPORTER) {
+    return ticket;
+  }
+
+  return {
+    ...ticket,
+    comments: ticket.comments.filter((comment) => !comment.isInternal),
+  };
+}
+
+function canChangeStatus(ticket: Ticket, requestedStatus: TicketStatus, user: AuthenticatedUser): boolean {
+  if (user.role === UserRole.ADMIN) {
+    return true;
+  }
+
+  if (user.role === UserRole.TECHNICIAN) {
+    return ticket.assigneeId === user.userId;
+  }
+
+  return ticket.reporterId === user.userId && requestedStatus === TicketStatus.CLOSED;
+}
 
 export function createTicketRoutes(ticketService: TicketService): Router {
   const router = Router();
@@ -13,7 +39,10 @@ export function createTicketRoutes(ticketService: TicketService): Router {
     async (req: AuthenticatedRequest, res: Response): Promise<void> => {
       const user = req.user!;
       const result = await ticketService.getTicketsByUser(user.userId);
-      res.status(200).json(result);
+      res.status(200).json({
+        ...result,
+        tickets: result.tickets.map((ticket) => serializeTicketForUser(ticket, user)),
+      });
     }
   );
 
@@ -38,7 +67,7 @@ export function createTicketRoutes(ticketService: TicketService): Router {
         return;
       }
 
-      res.status(201).json(result.ticket);
+      res.status(201).json(serializeTicketForUser(result.ticket, user));
     }
   );
 
@@ -56,14 +85,13 @@ export function createTicketRoutes(ticketService: TicketService): Router {
         return;
       }
 
-      res.status(200).json(result.ticket);
+      res.status(200).json(serializeTicketForUser(result.ticket, req.user!));
     }
   );
 
   // PUT /tickets/:ticketId/status — change status
   router.put(
     '/:ticketId/status',
-    requirePermission('change_status'),
     async (req: AuthenticatedRequest, res: Response): Promise<void> => {
       const user = req.user!;
       const ticketId = req.params.ticketId as string;
@@ -74,6 +102,21 @@ export function createTicketRoutes(ticketService: TicketService): Router {
         return;
       }
 
+      const current = await ticketService.getTicket(ticketId);
+      if (!current.success) {
+        res.status(404).json({ error: 'TICKET_NOT_FOUND', message: current.error });
+        return;
+      }
+
+      if (!canChangeStatus(current.ticket, status as TicketStatus, user)) {
+        res.status(403).json({
+          error: 'PERMISSION_DENIED',
+          message: 'Insufficient permissions',
+          requiredRole: UserRole.TECHNICIAN,
+        });
+        return;
+      }
+
       const result = await ticketService.changeStatus(ticketId, status as TicketStatus, user.userId);
 
       if (!result.success) {
@@ -81,7 +124,7 @@ export function createTicketRoutes(ticketService: TicketService): Router {
         return;
       }
 
-      res.status(200).json(result.ticket);
+      res.status(200).json(serializeTicketForUser(result.ticket, user));
     }
   );
 
@@ -106,7 +149,7 @@ export function createTicketRoutes(ticketService: TicketService): Router {
         return;
       }
 
-      res.status(200).json(result.ticket);
+      res.status(200).json(serializeTicketForUser(result.ticket, user));
     }
   );
 

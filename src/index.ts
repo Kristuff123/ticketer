@@ -11,6 +11,7 @@ import { createTicketRoutes } from './routes/tickets.js';
 import { createQueueRoutes } from './routes/queue.js';
 import { createNotificationRoutes } from './routes/notifications.js';
 import { createAuthRoutes } from './routes/auth.js';
+import { createUserRoutes } from './routes/users.js';
 
 assertRuntimeConfig();
 
@@ -63,6 +64,7 @@ app.use(authenticate);
 app.use('/tickets', createTicketRoutes(ticketService));
 app.use('/queue', createQueueRoutes(queueService));
 app.use('/notifications', createNotificationRoutes(notificationService));
+app.use('/users', createUserRoutes(userService));
 
 app.use(notFound);
 app.use(errorHandler);

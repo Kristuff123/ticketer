@@ -22,6 +22,24 @@ export interface Credentials {
   password: string;
 }
 
+export interface RegisterInput {
+  email: string;
+  password: string;
+  name: string;
+  department: string;
+}
+
+export interface AdminCreateUserInput extends RegisterInput {
+  role: UserRole;
+}
+
+export interface UserUpdateInput {
+  name?: string;
+  department?: string;
+  role?: UserRole;
+  isActive?: boolean;
+}
+
 export type AuthResult =
   | { success: true; token: string; user: User }
   | { success: false; error: string };

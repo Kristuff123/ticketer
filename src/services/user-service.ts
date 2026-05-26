@@ -2,7 +2,16 @@ import crypto from 'node:crypto';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { getDemoPasswords, getJwtSecret, getTokenExpiration } from '../config/env.js';
 import { UserRole } from '../models/enums.js';
-import { User, UserPreferences, Credentials, AuthResult } from '../models/user.js';
+import {
+  AdminCreateUserInput,
+  AuthResult,
+  Credentials,
+  RegisterInput,
+  User,
+  UserPreferences,
+  UserUpdateInput,
+} from '../models/user.js';
+import { validateEmail } from '../utils/validation.js';
 import { IUserService } from './interfaces/index.js';
 
 const JWT_SECRET = getJwtSecret();
@@ -97,6 +106,16 @@ export class UserService implements IUserService {
     return users.filter((u) => u.role === role);
   }
 
+  async listUsers(): Promise<User[]> {
+    return [...users].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+  }
+
+  async getAssignableUsers(): Promise<User[]> {
+    return users
+      .filter((u) => u.isActive && (u.role === UserRole.TECHNICIAN || u.role === UserRole.ADMIN))
+      .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+  }
+
   async authenticateUser(credentials: Credentials): Promise<AuthResult> {
     const user = users.find(
       (u) => u.email.toLowerCase() === credentials.email.toLowerCase()
@@ -117,6 +136,71 @@ export class UserService implements IUserService {
 
     const token = this.generateToken(user);
     return { success: true, token, user };
+  }
+
+  async registerUser(input: RegisterInput): Promise<AuthResult> {
+    const validation = this.validateUserInput(input);
+    if (!validation.success) {
+      return validation;
+    }
+
+    const user = this.createStoredUser(input, UserRole.REPORTER);
+    const token = this.generateToken(user);
+    return { success: true, token, user };
+  }
+
+  async createUser(input: AdminCreateUserInput): Promise<{ success: true; user: User } | { success: false; error: string }> {
+    const validation = this.validateUserInput(input);
+    if (!validation.success) {
+      return validation;
+    }
+
+    const role = input.role;
+    if (!Object.values(UserRole).includes(role)) {
+      return { success: false, error: 'Invalid role' };
+    }
+
+    const user = this.createStoredUser(input, role);
+    return { success: true, user };
+  }
+
+  async updateUser(
+    userId: string,
+    input: UserUpdateInput
+  ): Promise<{ success: true; user: User } | { success: false; error: string }> {
+    const user = users.find((u) => u.id === userId);
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (name.length < 2 || name.length > 100) {
+        return { success: false, error: 'Name must be between 2 and 100 characters' };
+      }
+      user.name = name;
+    }
+
+    if (input.department !== undefined) {
+      const department = input.department.trim();
+      if (department.length < 2 || department.length > 100) {
+        return { success: false, error: 'Department must be between 2 and 100 characters' };
+      }
+      user.department = department;
+    }
+
+    if (input.role !== undefined) {
+      if (!Object.values(UserRole).includes(input.role)) {
+        return { success: false, error: 'Invalid role' };
+      }
+      user.role = input.role;
+    }
+
+    if (input.isActive !== undefined) {
+      user.isActive = input.isActive;
+    }
+
+    return { success: true, user };
   }
 
   async hasPermission(
@@ -224,6 +308,54 @@ export class UserService implements IUserService {
     }
 
     user.preferences = { ...user.preferences, ...prefs };
+    return user;
+  }
+
+  private validateUserInput(input: RegisterInput): { success: true } | { success: false; error: string } {
+    const email = input.email.trim().toLowerCase();
+    const name = input.name.trim();
+    const department = input.department.trim();
+    const password = input.password;
+
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.isValid) {
+      return { success: false, error: emailValidation.errors.email || 'Invalid email' };
+    }
+
+    if (name.length < 2 || name.length > 100) {
+      return { success: false, error: 'Name must be between 2 and 100 characters' };
+    }
+
+    if (department.length < 2 || department.length > 100) {
+      return { success: false, error: 'Department must be between 2 and 100 characters' };
+    }
+
+    if (password.length < 8 || password.length > 128) {
+      return { success: false, error: 'Password must be between 8 and 128 characters' };
+    }
+
+    if (users.some((u) => u.email.toLowerCase() === email)) {
+      return { success: false, error: 'User with this email already exists' };
+    }
+
+    return { success: true };
+  }
+
+  private createStoredUser(input: RegisterInput, role: UserRole): User {
+    const email = input.email.trim().toLowerCase();
+    const user: User = {
+      id: crypto.randomUUID(),
+      email,
+      name: input.name.trim(),
+      role,
+      department: input.department.trim(),
+      isActive: true,
+      preferences: { emailNotifications: true, dashboardNotifications: true, language: 'pl' },
+      createdAt: new Date(),
+    };
+
+    users.push(user);
+    passwordHashes[email] = hashPassword(input.password);
     return user;
   }
 

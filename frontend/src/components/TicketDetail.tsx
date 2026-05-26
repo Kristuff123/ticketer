@@ -5,8 +5,10 @@ import {
   assignTicket,
   addComment,
   getTicketHistory,
+  getAssignableUsers,
   type Ticket,
   type HistoryEntry,
+  type User,
 } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { STORE_LOCATIONS } from '../data/store-locations';
@@ -49,12 +51,12 @@ const priorityLabel: Record<string, string> = {
 };
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
-  NEW: ['IN_PROGRESS'],
-  IN_PROGRESS: ['WAITING_FOR_INFO', 'RESOLVED'],
-  WAITING_FOR_INFO: ['IN_PROGRESS'],
+  NEW: ['IN_PROGRESS', 'CLOSED'],
+  IN_PROGRESS: ['WAITING_FOR_INFO', 'RESOLVED', 'CLOSED'],
+  WAITING_FOR_INFO: ['IN_PROGRESS', 'CLOSED'],
   RESOLVED: ['CLOSED', 'REOPENED'],
   CLOSED: ['REOPENED'],
-  REOPENED: ['IN_PROGRESS'],
+  REOPENED: ['IN_PROGRESS', 'CLOSED'],
 };
 
 function getLocationLabel(location?: string) {
@@ -71,6 +73,7 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
   const [commentContent, setCommentContent] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [assigneeId, setAssigneeId] = useState('');
+  const [assignableUsers, setAssignableUsers] = useState<User[]>([]);
   const [activeTab, setActiveTab] = useState<'comments' | 'history'>('comments');
 
   useEffect(() => {
@@ -78,11 +81,20 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
     loadHistory();
   }, [ticketId]);
 
+  useEffect(() => {
+    if (user?.role !== 'ADMIN') return;
+
+    getAssignableUsers()
+      .then(setAssignableUsers)
+      .catch(() => setAssignableUsers([]));
+  }, [user?.role]);
+
   async function loadTicket() {
     setLoading(true);
     try {
       const data = await getTicket(ticketId);
       setTicket(data);
+      setAssigneeId(data.assigneeId ?? '');
     } catch {
       // ignore
     } finally {
@@ -116,7 +128,6 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
       await assignTicket(ticketId, assigneeId.trim());
       await loadTicket();
       await loadHistory();
-      setAssigneeId('');
       onUpdated?.();
     } catch {
       // ignore
@@ -154,8 +165,15 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
     );
   }
 
-  const allowedTransitions = STATUS_TRANSITIONS[ticket.status] || [];
-  const isAdminOrTech = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
+  const isAssignedTech = user?.role === 'TECHNICIAN' && ticket.assigneeId === user.id;
+  const isOwnerReporter = user?.role === 'REPORTER' && ticket.reporterId === user.id;
+  const canAssign = user?.role === 'ADMIN';
+  const canChangeStatus = user?.role === 'ADMIN' || isAssignedTech || isOwnerReporter;
+  const canAddComment = user?.role === 'ADMIN' || isAssignedTech || isOwnerReporter;
+  const canAddInternalComment = user?.role === 'ADMIN' || isAssignedTech;
+  const allowedTransitions = (STATUS_TRANSITIONS[ticket.status] || []).filter((status) =>
+    user?.role === 'REPORTER' ? status === 'CLOSED' : true
+  );
 
   return (
     <div className="surface overflow-hidden rounded-2xl">
@@ -215,10 +233,10 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
       </div>
 
       {/* Actions */}
-      {isAdminOrTech && (
+      {(canChangeStatus || canAssign) && (
         <div className="space-y-3 border-b border-slate-100 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/70">
           {/* Status change */}
-          {allowedTransitions.length > 0 && (
+          {canChangeStatus && allowedTransitions.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Zmień status:</span>
               {allowedTransitions.map((status) => (
@@ -234,22 +252,30 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
           )}
 
           {/* Assign */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Przypisz:</span>
-            <input
-              type="text"
-              value={assigneeId}
-              onChange={(e) => setAssigneeId(e.target.value)}
-              placeholder="ID użytkownika"
-              className="field w-44 py-1.5 text-sm"
-            />
-            <button
-              onClick={handleAssign}
-              className="primary-button px-3 py-1.5 text-xs"
-            >
-              Przypisz
-            </button>
-          </div>
+          {canAssign && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Przypisz:</span>
+              <select
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                className="field w-64 py-1.5 text-sm"
+              >
+                <option value="">Wybierz technika</option>
+                {assignableUsers.map((assignee) => (
+                  <option key={assignee.id} value={assignee.id}>
+                    {assignee.name} ({assignee.role === 'ADMIN' ? 'Admin' : 'Technik'})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleAssign}
+                disabled={!assigneeId}
+                className="primary-button px-3 py-1.5 text-xs"
+              >
+                Przypisz
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -316,34 +342,36 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
             )}
 
             {/* Add comment form */}
-            <form onSubmit={handleAddComment} className="mt-4 space-y-2">
-              <textarea
-                value={commentContent}
-                onChange={(e) => setCommentContent(e.target.value)}
-                placeholder="Dodaj komentarz..."
-                rows={3}
-                className="field text-sm"
-              />
-              <div className="flex items-center justify-between">
-                {isAdminOrTech && (
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={isInternal}
-                      onChange={(e) => setIsInternal(e.target.checked)}
-                      className="rounded border-slate-300"
-                    />
-                    Komentarz wewnętrzny
-                  </label>
-                )}
-                <button
-                  type="submit"
-                  className="primary-button px-4 py-2 text-sm"
-                >
-                  Dodaj
-                </button>
-              </div>
-            </form>
+            {canAddComment && (
+              <form onSubmit={handleAddComment} className="mt-4 space-y-2">
+                <textarea
+                  value={commentContent}
+                  onChange={(e) => setCommentContent(e.target.value)}
+                  placeholder="Dodaj komentarz..."
+                  rows={3}
+                  className="field text-sm"
+                />
+                <div className="flex items-center justify-between">
+                  {canAddInternalComment && (
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={isInternal}
+                        onChange={(e) => setIsInternal(e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      Komentarz wewnętrzny
+                    </label>
+                  )}
+                  <button
+                    type="submit"
+                    className="primary-button px-4 py-2 text-sm"
+                  >
+                    Dodaj
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import {
   login as apiLogin,
+  register as apiRegister,
   setToken,
   getToken,
   setUnauthorizedHandler,
@@ -11,8 +12,16 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
   logout: () => void;
   loading: boolean;
+}
+
+interface RegisterData {
+  email: string;
+  password: string;
+  name: string;
+  department: string;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -49,6 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('user', JSON.stringify(response.user));
   };
 
+  const register = async (data: RegisterData) => {
+    const response = await apiRegister(data);
+    setToken(response.token);
+    setUser(response.user);
+    localStorage.setItem('user', JSON.stringify(response.user));
+  };
+
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -61,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         login,
+        register,
         logout,
         loading,
       }}
