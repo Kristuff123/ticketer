@@ -44,24 +44,24 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="app-shell">
       <Navbar />
 
-      <div className="flex">
+      <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6 md:px-6">
         {/* Sidebar */}
-        <aside className="w-64 min-h-[calc(100vh-57px)] bg-gray-900 text-white p-4 hidden lg:block">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase mb-4">Filtry</h2>
+        <aside className="surface hidden h-fit w-72 shrink-0 rounded-2xl p-5 lg:block">
+          <h2 className="mb-5 text-xs font-black uppercase text-slate-400 dark:text-slate-500">Filtry kolejki</h2>
 
           <div className="space-y-4">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Priorytet</label>
+              <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">Priorytet</label>
               <select
                 value={priority}
                 onChange={(e) => {
                   setPriority(e.target.value);
                   handleFilterChange();
                 }}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:ring-2 focus:ring-blue-500"
+                className="field text-sm"
               >
                 <option value="">Wszystkie</option>
                 <option value="CRITICAL">Krytyczny</option>
@@ -72,14 +72,14 @@ export default function AdminDashboard() {
             </div>
 
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Kategoria</label>
+              <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">Kategoria</label>
               <select
                 value={category}
                 onChange={(e) => {
                   setCategory(e.target.value);
                   handleFilterChange();
                 }}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:ring-2 focus:ring-blue-500"
+                className="field text-sm"
               >
                 <option value="">Wszystkie</option>
                 <option value="HARDWARE">Sprzęt</option>
@@ -91,14 +91,14 @@ export default function AdminDashboard() {
             </div>
 
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Sortowanie</label>
+              <label className="mb-1.5 block text-sm font-bold text-slate-700 dark:text-slate-200">Sortowanie</label>
               <select
                 value={sortBy}
                 onChange={(e) => {
                   setSortBy(e.target.value);
                   handleFilterChange();
                 }}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:ring-2 focus:ring-blue-500"
+                className="field text-sm"
               >
                 <option value="">Domyślne</option>
                 <option value="priority">Priorytet</option>
@@ -114,7 +114,7 @@ export default function AdminDashboard() {
                 setSortBy('');
                 setPage(1);
               }}
-              className="w-full px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+              className="secondary-button w-full px-3 py-2.5 text-sm"
             >
               Wyczyść filtry
             </button>
@@ -122,21 +122,35 @@ export default function AdminDashboard() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 p-6">
+        <main className="min-w-0 flex-1">
+          <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div>
+              <h1 className="text-3xl font-black text-slate-950 dark:text-white">Kolejka obsługi</h1>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Priorytety, statusy i szczegóły zgłoszeń dla zespołu IT.
+              </p>
+            </div>
+            {queueData && (
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                {queueData.total} zgłoszeń w widoku
+              </div>
+            )}
+          </div>
+
           {/* Stats */}
           <div className="mb-6">
             <QueueStats />
           </div>
 
           {/* Mobile filters */}
-          <div className="lg:hidden mb-4 flex gap-2 flex-wrap">
+          <div className="mb-5 flex flex-wrap gap-2 lg:hidden">
             <select
               value={priority}
               onChange={(e) => {
                 setPriority(e.target.value);
                 handleFilterChange();
               }}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              className="field w-auto text-sm"
             >
               <option value="">Priorytet: Wszystkie</option>
               <option value="CRITICAL">Krytyczny</option>
@@ -150,7 +164,7 @@ export default function AdminDashboard() {
                 setCategory(e.target.value);
                 handleFilterChange();
               }}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              className="field w-auto text-sm"
             >
               <option value="">Kategoria: Wszystkie</option>
               <option value="HARDWARE">Sprzęt</option>
@@ -162,14 +176,14 @@ export default function AdminDashboard() {
           </div>
 
           {/* Content grid */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             {/* Ticket list */}
             <div className="xl:col-span-2">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-gray-800">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-black text-slate-950 dark:text-white">
                   Kolejka zgłoszeń
                   {queueData && (
-                    <span className="text-sm font-normal text-gray-500 ml-2">
+                    <span className="ml-2 text-sm font-semibold text-slate-500 dark:text-slate-400">
                       ({queueData.total} łącznie)
                     </span>
                   )}
@@ -177,7 +191,7 @@ export default function AdminDashboard() {
               </div>
 
               {loading ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+                <div className="surface rounded-2xl p-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
                   Ładowanie...
                 </div>
               ) : queueData ? (
@@ -190,29 +204,29 @@ export default function AdminDashboard() {
 
                   {/* Pagination */}
                   {queueData.totalPages > 1 && (
-                    <div className="mt-4 flex items-center justify-center gap-2">
+                    <div className="mt-4 flex items-center justify-center gap-3">
                       <button
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
                         disabled={page <= 1}
-                        className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="secondary-button px-3 py-2 text-sm disabled:opacity-50"
                       >
-                        ← Poprzednia
+                        Poprzednia
                       </button>
-                      <span className="text-sm text-gray-600">
+                      <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
                         Strona {queueData.page} z {queueData.totalPages}
                       </span>
                       <button
                         onClick={() => setPage((p) => Math.min(queueData.totalPages, p + 1))}
                         disabled={page >= queueData.totalPages}
-                        className="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="secondary-button px-3 py-2 text-sm disabled:opacity-50"
                       >
-                        Następna →
+                        Następna
                       </button>
                     </div>
                   )}
                 </>
               ) : (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+                <div className="surface rounded-2xl p-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
                   Nie udało się załadować kolejki
                 </div>
               )}
@@ -226,9 +240,9 @@ export default function AdminDashboard() {
                   onUpdated={loadQueue}
                 />
               ) : (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+                <div className="surface rounded-2xl p-8 text-center text-slate-400 dark:text-slate-500">
                   <svg
-                    className="w-12 h-12 mx-auto mb-3 text-gray-300"
+                    className="mx-auto mb-3 h-12 w-12 text-slate-300"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -240,7 +254,7 @@ export default function AdminDashboard() {
                       d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                     />
                   </svg>
-                  <p>Wybierz zgłoszenie z listy, aby zobaczyć szczegóły</p>
+                  <p className="text-sm font-medium">Wybierz zgłoszenie z listy, aby zobaczyć szczegóły</p>
                 </div>
               )}
             </div>

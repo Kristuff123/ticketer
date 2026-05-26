@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as fc from 'fast-check';
-import { NotificationService } from '../services/notification-service';
-import { NotificationType } from '../models/enums';
-import { Notification } from '../models/notification';
+import { NotificationService } from '../services/notification-service.js';
+import { NotificationType } from '../models/enums.js';
+import { Notification } from '../models/notification.js';
 
 /**
  * Property 12: Notification Ordering

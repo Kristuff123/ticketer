@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { validateTicketInput, validateCommentInput, validateEmail } from './validation';
-import { TicketCategory, Priority } from '../models';
-import { TicketCreateInput } from '../models';
+import { validateTicketInput, validateCommentInput, validateEmail } from './validation.js';
+import { TicketCategory, Priority } from '../models/index.js';
+import { TicketCreateInput } from '../models/index.js';
 
 describe('validateTicketInput', () => {
   const validInput: TicketCreateInput = {

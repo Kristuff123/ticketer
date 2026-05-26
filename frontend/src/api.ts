@@ -62,6 +62,7 @@ export function createTicket(data: {
   description: string;
   category: string;
   priority: string;
+  location: string;
 }) {
   return request<Ticket>('/tickets', {
     method: 'POST',
@@ -178,6 +179,7 @@ export interface Ticket {
   title: string;
   description: string;
   category: string;
+  location?: string;
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   status: 'NEW' | 'IN_PROGRESS' | 'WAITING_FOR_INFO' | 'RESOLVED' | 'CLOSED' | 'REOPENED';
   reporterId: string;

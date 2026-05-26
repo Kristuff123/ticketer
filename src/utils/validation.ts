@@ -1,5 +1,5 @@
-import { TicketCategory, Priority } from '../models';
-import { TicketCreateInput } from '../models';
+import { TicketCategory, Priority } from '../models/index.js';
+import { TicketCreateInput } from '../models/index.js';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -33,6 +33,14 @@ export function validateTicketInput(data: TicketCreateInput): ValidationResult {
   const validPriorities = Object.values(Priority);
   if (!validPriorities.includes(data.priority)) {
     errors.priority = `Priority must be one of: ${validPriorities.join(', ')}`;
+  }
+
+  if (data.location !== undefined) {
+    if (data.location.trim().length === 0) {
+      errors.location = 'Location must contain at least 1 non-whitespace character';
+    } else if (data.location.length > 200) {
+      errors.location = 'Location must not exceed 200 characters';
+    }
   }
 
   return {

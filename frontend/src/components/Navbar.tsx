@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getNotifications, markNotificationRead, type Notification } from '../api';
+import ThemeToggle from './ThemeToggle';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -42,22 +43,29 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-bold text-gray-800">🎫 Ticketer</h1>
+    <nav className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/88 md:px-6">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-sm font-black text-white dark:bg-blue-600">
+          T
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-lg font-black text-slate-950 dark:text-white">Ticketer</h1>
         {user && (
-          <span className="text-sm text-gray-500">
-            | {roleLabels[user.role] || user.role}
-          </span>
+            <p className="truncate text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {roleLabels[user.role] || user.role}
+            </p>
         )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 sm:gap-3">
         {/* Notifications */}
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 text-gray-600 hover:text-gray-800 rounded-lg hover:bg-gray-100"
+            className="relative rounded-xl border border-slate-200 bg-white p-2 text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+            aria-label="Powiadomienia"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -68,32 +76,32 @@ export default function Navbar() {
               />
             </svg>
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[0.68rem] font-black text-white ring-2 ring-white">
                 {unreadCount}
               </span>
             )}
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-96 overflow-y-auto">
-              <div className="p-3 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-800">Powiadomienia</h3>
+            <div className="absolute right-0 z-50 mt-3 max-h-96 w-[min(22rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/12 dark:border-slate-700 dark:bg-slate-900">
+              <div className="border-b border-slate-100 p-4 dark:border-slate-800">
+                <h3 className="font-black text-slate-900 dark:text-white">Powiadomienia</h3>
               </div>
               {notifications.length === 0 ? (
-                <div className="p-4 text-center text-gray-500 text-sm">
+                <div className="p-5 text-center text-sm text-slate-500 dark:text-slate-400">
                   Brak powiadomień
                 </div>
               ) : (
                 notifications.map((n) => (
                   <div
                     key={n.id}
-                    className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
-                      !n.read ? 'bg-blue-50' : ''
+                    className={`cursor-pointer border-b border-slate-100 p-4 transition-colors last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800 ${
+                      !n.read ? 'bg-blue-50/80 dark:bg-blue-950/40' : ''
                     }`}
                     onClick={() => handleMarkRead(n.id)}
                   >
-                    <p className="text-sm text-gray-700">{n.message}</p>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{n.message}</p>
+                    <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
                       {new Date(n.createdAt).toLocaleString('pl-PL')}
                     </p>
                   </div>
@@ -104,15 +112,19 @@ export default function Navbar() {
         </div>
 
         {/* User info */}
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-700">{user?.name || user?.email}</span>
+        <div className="flex items-center gap-2">
+          <ThemeToggle compact />
+          <span className="hidden max-w-48 truncate text-sm font-semibold text-slate-700 dark:text-slate-200 sm:inline">
+            {user?.name || user?.email}
+          </span>
           <button
             onClick={logout}
-            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+            className="secondary-button px-3 py-2 text-sm"
           >
             Wyloguj
           </button>
         </div>
+      </div>
       </div>
     </nav>
   );

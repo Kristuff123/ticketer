@@ -1,4 +1,4 @@
-import { IQueueService } from '../services/interfaces/queue-service.interface';
+import { IQueueService } from '../services/interfaces/queue-service.interface.js';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 

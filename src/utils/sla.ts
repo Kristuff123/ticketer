@@ -1,4 +1,4 @@
-import { Priority } from '../models';
+import { Priority } from '../models/index.js';
 
 /**
  * SLA duration in hours for each priority level.

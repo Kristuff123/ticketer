@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { Server, Socket } from 'socket.io';
-import { Notification } from '../models/notification';
-import { userService } from './user-service';
+import { Notification } from '../models/notification.js';
+import { userService } from './user-service.js';
 
 /**
  * WebSocketService manages Socket.io connections for real-time notification delivery.

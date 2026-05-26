@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { paginate } from '../utils/pagination';
+import { paginate } from '../utils/pagination.js';
 
 /**
  * Property 8: Pagination Consistency

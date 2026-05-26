@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { HistoryActionType, TicketHistoryEntry } from '../models';
+import { HistoryActionType, TicketHistoryEntry } from '../models/index.js';
 
 export interface CreateHistoryEntryParams {
   ticketId: string;

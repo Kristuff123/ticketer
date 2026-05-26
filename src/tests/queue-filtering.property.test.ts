@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { TicketStatus, TicketCategory, Priority } from '../models/enums';
-import { Ticket } from '../models/ticket';
-import { QueueFilters } from '../models/queue';
-import { QueueService } from '../services/queue-service';
+import { TicketStatus, TicketCategory, Priority } from '../models/enums.js';
+import { Ticket } from '../models/ticket.js';
+import { QueueFilters } from '../models/queue.js';
+import { QueueService } from '../services/queue-service.js';
 
 /**
  * Property 6: Queue Filtering Invariant

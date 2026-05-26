@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from '../models/enums';
-import { userService } from '../services/user-service';
+import { UserRole } from '../models/enums.js';
+import { userService } from '../services/user-service.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: {

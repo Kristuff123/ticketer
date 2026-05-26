@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { HistoryActionType } from '../models';
-import { createHistoryEntry, getTicketHistory } from './history';
+import { HistoryActionType } from '../models/index.js';
+import { createHistoryEntry, getTicketHistory } from './history.js';
 
 describe('createHistoryEntry', () => {
   it('creates a valid history entry with all required fields', () => {

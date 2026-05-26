@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { UserService, TicketLookupFn } from './user-service';
-import { UserRole } from '../models/enums';
+import { UserService, TicketLookupFn } from './user-service.js';
+import { UserRole } from '../models/enums.js';
 
 describe('UserService', () => {
   let service: UserService;

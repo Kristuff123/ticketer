@@ -7,11 +7,11 @@ import {
   UserRole,
   Ticket,
   User,
-} from '../models';
-import { TicketService } from '../services/ticket-service';
-import { QueueService } from '../services/queue-service';
-import { NotificationService } from '../services/notification-service';
-import { UserService } from '../services/user-service';
+} from '../models/index.js';
+import { TicketService } from '../services/ticket-service.js';
+import { QueueService } from '../services/queue-service.js';
+import { NotificationService } from '../services/notification-service.js';
+import { UserService } from '../services/user-service.js';
 
 /**
  * Integration tests for the full ticket lifecycle.

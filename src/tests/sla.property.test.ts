@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { calculateDueDate, recalculateDueDate, SLA_HOURS } from '../utils/sla';
-import { Priority } from '../models';
+import { calculateDueDate, recalculateDueDate, SLA_HOURS } from '../utils/sla.js';
+import { Priority } from '../models/index.js';
 
 /**
  * Property 3: SLA Due Date Calculation

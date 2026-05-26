@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { EmailService, delay } from './email-service';
-import { Notification } from '../models/notification';
-import { NotificationType } from '../models/enums';
+import { EmailService, createEmailServiceFromEnv, delay } from './email-service.js';
+import { Notification } from '../models/notification.js';
+import { NotificationType } from '../models/enums.js';
 
 describe('EmailService', () => {
   describe('delay', () => {
@@ -165,6 +165,39 @@ describe('EmailService', () => {
       // Caller should mark notification with delivery failure status
       // Dashboard notification is preserved regardless (handled by caller)
       vi.useRealTimers();
+    });
+  });
+
+  describe('createEmailServiceFromEnv', () => {
+    it('should create a Brevo SMTP transport when Brevo credentials are configured', async () => {
+      vi.stubEnv('EMAIL_TRANSPORT', 'brevo');
+      vi.stubEnv('BREVO_SMTP_LOGIN', 'login@example.com');
+      vi.stubEnv('BREVO_SMTP_KEY', 'smtp-key');
+      vi.stubEnv('EMAIL_FROM', '"Support" <support@example.com>');
+
+      const service = createEmailServiceFromEnv();
+      const transporter = (service as any).transporter;
+
+      expect(transporter.options.host).toBe('smtp-relay.brevo.com');
+      expect(transporter.options.port).toBe(587);
+      expect(transporter.options.auth.user).toBe('login@example.com');
+      vi.unstubAllEnvs();
+    });
+
+    it('should fall back to JSON transport when SMTP credentials are incomplete', async () => {
+      vi.stubEnv('EMAIL_TRANSPORT', 'brevo');
+      vi.stubEnv('BREVO_SMTP_LOGIN', '');
+      vi.stubEnv('BREVO_SMTP_KEY', '');
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const service = createEmailServiceFromEnv();
+      const result = await service.sendEmail('user@example.com', 'Test', '<p>Hello</p>');
+
+      expect(result).toBe(true);
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      vi.unstubAllEnvs();
     });
   });
 });

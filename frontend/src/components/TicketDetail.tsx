@@ -9,6 +9,7 @@ import {
   type HistoryEntry,
 } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { STORE_LOCATIONS } from '../data/store-locations';
 
 interface TicketDetailProps {
   ticketId: string;
@@ -16,12 +17,12 @@ interface TicketDetailProps {
 }
 
 const statusBadge: Record<string, string> = {
-  NEW: 'bg-blue-100 text-blue-800',
-  IN_PROGRESS: 'bg-purple-100 text-purple-800',
-  WAITING_FOR_INFO: 'bg-amber-100 text-amber-800',
-  RESOLVED: 'bg-green-100 text-green-800',
-  CLOSED: 'bg-gray-100 text-gray-800',
-  REOPENED: 'bg-red-100 text-red-800',
+  NEW: 'bg-blue-50 text-blue-700 ring-blue-200',
+  IN_PROGRESS: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  WAITING_FOR_INFO: 'bg-amber-50 text-amber-700 ring-amber-200',
+  RESOLVED: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  CLOSED: 'bg-slate-100 text-slate-700 ring-slate-200',
+  REOPENED: 'bg-red-50 text-red-700 ring-red-200',
 };
 
 const statusLabel: Record<string, string> = {
@@ -34,10 +35,10 @@ const statusLabel: Record<string, string> = {
 };
 
 const priorityBadge: Record<string, string> = {
-  CRITICAL: 'bg-red-100 text-red-800',
-  HIGH: 'bg-orange-100 text-orange-800',
-  MEDIUM: 'bg-yellow-100 text-yellow-800',
-  LOW: 'bg-green-100 text-green-800',
+  CRITICAL: 'bg-red-50 text-red-700 ring-red-200',
+  HIGH: 'bg-orange-50 text-orange-700 ring-orange-200',
+  MEDIUM: 'bg-amber-50 text-amber-700 ring-amber-200',
+  LOW: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
 };
 
 const priorityLabel: Record<string, string> = {
@@ -55,6 +56,12 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   CLOSED: ['REOPENED'],
   REOPENED: ['IN_PROGRESS'],
 };
+
+function getLocationLabel(location?: string) {
+  if (!location) return 'Nie podano';
+  const store = STORE_LOCATIONS.find((item) => item.code === location);
+  return store ? `${store.code} — ${store.name}` : location;
+}
 
 export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps) {
   const { user } = useAuth();
@@ -131,17 +138,17 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-6 animate-pulse">
-        <div className="h-6 bg-gray-200 rounded w-3/4 mb-4"></div>
-        <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-        <div className="h-4 bg-gray-200 rounded w-full"></div>
+      <div className="surface animate-pulse rounded-2xl p-6">
+        <div className="mb-4 h-6 w-3/4 rounded bg-slate-200 dark:bg-slate-700"></div>
+        <div className="mb-2 h-4 w-1/2 rounded bg-slate-200 dark:bg-slate-700"></div>
+        <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-700"></div>
       </div>
     );
   }
 
   if (!ticket) {
     return (
-      <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
+      <div className="surface rounded-2xl p-6 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
         Nie znaleziono zgłoszenia
       </div>
     );
@@ -151,24 +158,24 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
   const isAdminOrTech = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
+    <div className="surface overflow-hidden rounded-2xl">
       {/* Header */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">{ticket.title}</h2>
-            <p className="text-sm text-gray-500 mt-1">ID: {ticket.id}</p>
+      <div className="border-b border-slate-100 p-6 dark:border-slate-800">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-xl font-black text-slate-950 dark:text-white">{ticket.title}</h2>
+            <p className="mt-1 break-all text-xs font-semibold text-slate-400 dark:text-slate-500">ID: {ticket.id}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <span
-              className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${
+              className={`pill ring-1 ${
                 priorityBadge[ticket.priority] || ''
               }`}
             >
               {priorityLabel[ticket.priority] || ticket.priority}
             </span>
             <span
-              className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${
+              className={`pill ring-1 ${
                 statusBadge[ticket.status] || ''
               }`}
             >
@@ -177,26 +184,30 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
           </div>
         </div>
 
-        <p className="mt-4 text-sm text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
+        <p className="mt-5 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-300">{ticket.description}</p>
 
-        <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-500">Zgłaszający:</span>{' '}
-            <span className="text-gray-800">{ticket.reporterName || ticket.reporterId}</span>
+        <div className="mt-5 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
+            <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Zgłaszający</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">{ticket.reporterName || ticket.reporterId}</span>
           </div>
-          <div>
-            <span className="text-gray-500">Przypisany:</span>{' '}
-            <span className="text-gray-800">
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
+            <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Przypisany</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">
               {ticket.assigneeName || ticket.assigneeId || 'Nieprzypisany'}
             </span>
           </div>
-          <div>
-            <span className="text-gray-500">Kategoria:</span>{' '}
-            <span className="text-gray-800">{ticket.category}</span>
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
+            <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Kategoria</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">{ticket.category}</span>
           </div>
-          <div>
-            <span className="text-gray-500">Utworzono:</span>{' '}
-            <span className="text-gray-800">
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
+            <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Lokalizacja</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">{getLocationLabel(ticket.location)}</span>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
+            <span className="block text-xs font-bold text-slate-400 dark:text-slate-500">Utworzono</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">
               {new Date(ticket.createdAt).toLocaleString('pl-PL')}
             </span>
           </div>
@@ -205,16 +216,16 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
 
       {/* Actions */}
       {isAdminOrTech && (
-        <div className="p-4 bg-gray-50 border-b border-gray-200 space-y-3">
+        <div className="space-y-3 border-b border-slate-100 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/70">
           {/* Status change */}
           {allowedTransitions.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-gray-600">Zmień status:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Zmień status:</span>
               {allowedTransitions.map((status) => (
                 <button
                   key={status}
                   onClick={() => handleStatusChange(status)}
-                  className="px-3 py-1 text-xs font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  className="secondary-button px-3 py-1.5 text-xs"
                 >
                   {statusLabel[status] || status}
                 </button>
@@ -223,18 +234,18 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
           )}
 
           {/* Assign */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">Przypisz:</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Przypisz:</span>
             <input
               type="text"
               value={assigneeId}
               onChange={(e) => setAssigneeId(e.target.value)}
               placeholder="ID użytkownika"
-              className="px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="field w-44 py-1.5 text-sm"
             />
             <button
               onClick={handleAssign}
-              className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="primary-button px-3 py-1.5 text-xs"
             >
               Przypisz
             </button>
@@ -243,24 +254,24 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
       )}
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-slate-100 dark:border-slate-800">
         <div className="flex">
           <button
             onClick={() => setActiveTab('comments')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            className={`border-b-2 px-5 py-3 text-sm font-black transition-colors ${
               activeTab === 'comments'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-blue-600 text-blue-700 dark:text-blue-300'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
             }`}
           >
             Komentarze
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            className={`border-b-2 px-5 py-3 text-sm font-black transition-colors ${
               activeTab === 'history'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-blue-600 text-blue-700 dark:text-blue-300'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
             }`}
           >
             Historia
@@ -269,7 +280,7 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
       </div>
 
       {/* Tab content */}
-      <div className="p-4 max-h-80 overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto p-4">
         {activeTab === 'comments' && (
           <div className="space-y-3">
             {ticket.comments && ticket.comments.length > 0 ? (
@@ -278,30 +289,30 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
                   key={comment.id}
                   className={`p-3 rounded-lg ${
                     comment.isInternal
-                      ? 'bg-yellow-50 border border-yellow-200'
-                      : 'bg-gray-50 border border-gray-200'
+                      ? 'border border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/35'
+                      : 'border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/70'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-800">
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-800 dark:text-slate-100">
                       {comment.authorName || comment.authorId}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                       {comment.isInternal && (
-                        <span className="text-xs bg-yellow-200 text-yellow-800 px-1.5 py-0.5 rounded">
+                        <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-bold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
                           Wewnętrzny
                         </span>
                       )}
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-slate-400 dark:text-slate-500">
                         {new Date(comment.createdAt).toLocaleString('pl-PL')}
                       </span>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-700">{comment.content}</p>
+                  <p className="text-sm leading-6 text-slate-700 dark:text-slate-300">{comment.content}</p>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-gray-500 text-center py-4">Brak komentarzy</p>
+              <p className="py-4 text-center text-sm font-medium text-slate-500 dark:text-slate-400">Brak komentarzy</p>
             )}
 
             {/* Add comment form */}
@@ -311,23 +322,23 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
                 onChange={(e) => setCommentContent(e.target.value)}
                 placeholder="Dodaj komentarz..."
                 rows={3}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="field text-sm"
               />
               <div className="flex items-center justify-between">
                 {isAdminOrTech && (
-                  <label className="flex items-center gap-2 text-sm text-gray-600">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
                     <input
                       type="checkbox"
                       checked={isInternal}
                       onChange={(e) => setIsInternal(e.target.checked)}
-                      className="rounded border-gray-300"
+                      className="rounded border-slate-300"
                     />
                     Komentarz wewnętrzny
                   </label>
                 )}
                 <button
                   type="submit"
-                  className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="primary-button px-4 py-2 text-sm"
                 >
                   Dodaj
                 </button>
@@ -342,28 +353,28 @@ export default function TicketDetail({ ticketId, onUpdated }: TicketDetailProps)
               history.map((entry) => (
                 <div
                   key={entry.id}
-                  className="flex items-start gap-3 p-2 text-sm border-b border-gray-100 last:border-0"
+                  className="flex items-start gap-3 border-b border-slate-100 p-3 text-sm last:border-0 dark:border-slate-800"
                 >
-                  <div className="w-2 h-2 mt-1.5 rounded-full bg-blue-400 shrink-0"></div>
+                  <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-500"></div>
                   <div className="flex-1">
-                    <p className="text-gray-700">
+                    <p className="text-slate-700 dark:text-slate-300">
                       <span className="font-medium">{entry.userName || entry.userId}</span>{' '}
                       — {entry.action}
                       {entry.oldValue && entry.newValue && (
-                        <span className="text-gray-500">
+                        <span className="text-slate-500 dark:text-slate-400">
                           {' '}
                           ({entry.oldValue} → {entry.newValue})
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-slate-400 dark:text-slate-500">
                       {new Date(entry.createdAt).toLocaleString('pl-PL')}
                     </p>
                   </div>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-gray-500 text-center py-4">Brak historii</p>
+              <p className="py-4 text-center text-sm font-medium text-slate-500 dark:text-slate-400">Brak historii</p>
             )}
           </div>
         )}

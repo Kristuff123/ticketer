@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   category VARCHAR(50) NOT NULL,
   priority VARCHAR(50) NOT NULL,
   status VARCHAR(50) NOT NULL DEFAULT 'NEW',
+  location VARCHAR(200),
   reporter_id UUID NOT NULL REFERENCES users(id),
   assignee_id UUID REFERENCES users(id),
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),

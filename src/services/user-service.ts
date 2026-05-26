@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
-import { UserRole } from '../models/enums';
-import { User, UserPreferences, Credentials, AuthResult } from '../models/user';
-import { IUserService } from './interfaces';
+import { UserRole } from '../models/enums.js';
+import { User, UserPreferences, Credentials, AuthResult } from '../models/user.js';
+import { IUserService } from './interfaces/index.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-do-not-use-in-production';
 const TOKEN_EXPIRATION = '15m';

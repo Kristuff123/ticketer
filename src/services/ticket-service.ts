@@ -12,14 +12,14 @@ import {
   CommentInput,
   CommentResult,
   TicketListResult,
-} from '../models';
-import { validateStatusTransition, getAllowedTransitions } from '../utils/status-transitions';
-import { createHistoryEntry, getTicketHistory } from '../utils/history';
-import { validateCommentInput, validateTicketInput } from '../utils/validation';
-import { calculateDueDate } from '../utils/sla';
-import { ITicketService } from './interfaces';
-import { INotificationService } from './interfaces/notification-service.interface';
-import { IUserService } from './interfaces/user-service.interface';
+} from '../models/index.js';
+import { validateStatusTransition, getAllowedTransitions } from '../utils/status-transitions.js';
+import { createHistoryEntry, getTicketHistory } from '../utils/history.js';
+import { validateCommentInput, validateTicketInput } from '../utils/validation.js';
+import { calculateDueDate } from '../utils/sla.js';
+import { ITicketService } from './interfaces/index.js';
+import { INotificationService } from './interfaces/notification-service.interface.js';
+import { IUserService } from './interfaces/user-service.interface.js';
 
 // In-memory ticket store (to be replaced with database layer later)
 const tickets: Map<string, Ticket> = new Map();
@@ -58,6 +58,7 @@ export class TicketService implements ITicketService {
       category: data.category,
       priority: data.priority,
       status: TicketStatus.NEW,
+      location: data.location?.trim() || undefined,
       reporterId: data.reporterId,
       createdAt: now,
       updatedAt: now,

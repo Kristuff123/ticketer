@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { AuthenticatedRequest } from '../middleware/auth';
-import { UserService } from '../services/user-service';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { UserService } from '../services/user-service.js';
 
 export function createAuthRoutes(userServiceInstance: UserService): Router {
   const router = Router();

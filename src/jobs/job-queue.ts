@@ -1,4 +1,4 @@
-import { getClient } from '../cache/redis-client';
+import { getClient } from '../cache/redis-client.js';
 
 /**
  * Simple job queue using Redis lists.

@@ -1,9 +1,9 @@
 import { Router, Response } from 'express';
-import { AuthenticatedRequest } from '../middleware/auth';
-import { requireRole } from '../middleware/permissions';
-import { QueueService } from '../services/queue-service';
-import { UserRole, Priority, TicketCategory, TicketStatus } from '../models/enums';
-import { QueueFilters } from '../models/queue';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { requireRole } from '../middleware/permissions.js';
+import { QueueService } from '../services/queue-service.js';
+import { UserRole, Priority, TicketCategory, TicketStatus } from '../models/enums.js';
+import { QueueFilters } from '../models/queue.js';
 
 export function createQueueRoutes(queueService: QueueService): Router {
   const router = Router();

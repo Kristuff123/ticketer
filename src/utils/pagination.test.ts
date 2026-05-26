@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validatePaginationParams, paginate } from './pagination';
+import { validatePaginationParams, paginate } from './pagination.js';
 
 describe('validatePaginationParams', () => {
   it('accepts valid params', () => {

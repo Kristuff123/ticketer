@@ -1,4 +1,4 @@
-import { HistoryActionType } from './enums';
+import { HistoryActionType } from './enums.js';
 
 export interface TicketHistoryEntry {
   id: string;

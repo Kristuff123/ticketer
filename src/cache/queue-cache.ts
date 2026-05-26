@@ -1,4 +1,4 @@
-import { getCache, setCache, getClient } from './redis-client';
+import { getCache, setCache, getClient } from './redis-client.js';
 
 const QUEUE_CACHE_PREFIX = 'queue:';
 const DEFAULT_QUEUE_TTL = 30; // seconds

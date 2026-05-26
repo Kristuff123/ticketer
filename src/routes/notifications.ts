@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
-import { AuthenticatedRequest } from '../middleware/auth';
-import { NotificationService } from '../services/notification-service';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { NotificationService } from '../services/notification-service.js';
 
 export function createNotificationRoutes(notificationService: NotificationService): Router {
   const router = Router();

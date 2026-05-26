@@ -1,5 +1,5 @@
-import { Priority, TicketCategory, TicketStatus } from './enums';
-import { Ticket } from './ticket';
+import { Priority, TicketCategory, TicketStatus } from './enums.js';
+import { Ticket } from './ticket.js';
 
 export interface QueueFilters {
   priority?: Priority;

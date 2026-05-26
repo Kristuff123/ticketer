@@ -1,8 +1,8 @@
-import { TicketStatus } from '../../models/enums';
-import { Ticket, TicketCreateInput, TicketUpdateInput, TicketResult } from '../../models/ticket';
-import { CommentInput, CommentResult } from '../../models/comment';
-import { TicketHistoryEntry } from '../../models/history';
-import { TicketListResult } from '../../models/queue';
+import { TicketStatus } from '../../models/enums.js';
+import { Ticket, TicketCreateInput, TicketUpdateInput, TicketResult } from '../../models/ticket.js';
+import { CommentInput, CommentResult } from '../../models/comment.js';
+import { TicketHistoryEntry } from '../../models/history.js';
+import { TicketListResult } from '../../models/queue.js';
 
 export interface ITicketService {
   createTicket(data: TicketCreateInput): Promise<TicketResult>;

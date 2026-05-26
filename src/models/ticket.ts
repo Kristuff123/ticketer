@@ -1,6 +1,6 @@
-import { TicketCategory, Priority, TicketStatus } from './enums';
-import { Comment } from './comment';
-import { TicketHistoryEntry } from './history';
+import { TicketCategory, Priority, TicketStatus } from './enums.js';
+import { Comment } from './comment.js';
+import { TicketHistoryEntry } from './history.js';
 
 export interface Ticket {
   id: string;
@@ -9,6 +9,7 @@ export interface Ticket {
   category: TicketCategory;
   priority: Priority;
   status: TicketStatus;
+  location?: string;
   reporterId: string;
   assigneeId?: string;
   createdAt: Date;
@@ -24,6 +25,7 @@ export interface TicketCreateInput {
   description: string;
   category: TicketCategory;
   priority: Priority;
+  location?: string;
   reporterId: string;
 }
 
@@ -32,6 +34,7 @@ export interface TicketUpdateInput {
   description?: string;
   category?: TicketCategory;
   priority?: Priority;
+  location?: string;
 }
 
 export type TicketResult =

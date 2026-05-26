@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { validateTicketInput, validateCommentInput } from '../utils/validation';
-import { TicketCategory, Priority } from '../models';
+import { validateTicketInput, validateCommentInput } from '../utils/validation.js';
+import { TicketCategory, Priority } from '../models/index.js';
 
 /**
  * Property 2: Input Validation Correctness

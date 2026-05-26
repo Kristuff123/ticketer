@@ -1,7 +1,7 @@
 import { Response, NextFunction } from 'express';
-import { UserRole } from '../models/enums';
-import { userService } from '../services/user-service';
-import { AuthenticatedRequest } from './auth';
+import { UserRole } from '../models/enums.js';
+import { userService } from '../services/user-service.js';
+import { AuthenticatedRequest } from './auth.js';
 
 /**
  * Factory function that returns middleware to check if the authenticated user
