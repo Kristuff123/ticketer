@@ -1,14 +1,26 @@
 import pg from 'pg';
+import { getDatabaseUrl } from '../config/env.js';
 
 const { Pool } = pg;
 
-const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
-  port: parseInt(process.env.PGPORT || '5432', 10),
-  database: process.env.PGDATABASE || 'ticketer',
-  user: process.env.PGUSER || 'postgres',
-  password: process.env.PGPASSWORD || '',
-});
+const databaseUrl = getDatabaseUrl();
+const useSsl = process.env.PGSSL === 'true' || process.env.DATABASE_SSL === 'true';
+
+const pool = new Pool(
+  databaseUrl
+    ? {
+        connectionString: databaseUrl,
+        ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+      }
+    : {
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432', 10),
+        database: process.env.PGDATABASE || 'ticketer',
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD || '',
+        ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+      }
+);
 
 export interface QueryResult<T = Record<string, unknown>> {
   rows: T[];

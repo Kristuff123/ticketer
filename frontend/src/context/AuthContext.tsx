@@ -1,5 +1,11 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import { login as apiLogin, setToken, getToken, type User } from '../api';
+import {
+  login as apiLogin,
+  setToken,
+  getToken,
+  setUnauthorizedHandler,
+  type User,
+} from '../api';
 
 interface AuthContextType {
   user: User | null;
@@ -16,6 +22,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      localStorage.removeItem('user');
+    });
+
     const savedUser = localStorage.getItem('user');
     const savedToken = getToken();
     if (savedUser && savedToken) {
@@ -27,6 +38,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     setLoading(false);
+
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const login = async (email: string, password: string) => {

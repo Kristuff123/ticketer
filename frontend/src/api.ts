@@ -1,6 +1,8 @@
-const API_BASE = '/api';
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_BASE = configuredApiBase || '/api';
 
 let token: string | null = localStorage.getItem('token');
+let unauthorizedHandler: (() => void) | null = null;
 
 export function setToken(newToken: string | null) {
   token = newToken;
@@ -13,6 +15,10 @@ export function setToken(newToken: string | null) {
 
 export function getToken(): string | null {
   return token;
+}
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler;
 }
 
 async function request<T>(
@@ -32,6 +38,11 @@ async function request<T>(
     ...options,
     headers,
   });
+
+  if (response.status === 401) {
+    setToken(null);
+    unauthorizedHandler?.();
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Błąd serwera' }));
