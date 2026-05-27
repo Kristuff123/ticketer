@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import crypto from "node:crypto";
 import {
   TicketStatus,
   HistoryActionType,
@@ -12,30 +12,48 @@ import {
   CommentInput,
   CommentResult,
   TicketListResult,
-} from '../models/index.js';
-import { validateStatusTransition, getAllowedTransitions } from '../utils/status-transitions.js';
-import { createHistoryEntry, getTicketHistory } from '../utils/history.js';
-import { validateCommentInput, validateTicketInput } from '../utils/validation.js';
-import { calculateDueDate } from '../utils/sla.js';
-import { ITicketService } from './interfaces/index.js';
-import { INotificationService } from './interfaces/notification-service.interface.js';
-import { IUserService } from './interfaces/user-service.interface.js';
-
-// In-memory ticket store (to be replaced with database layer later)
-const tickets: Map<string, Ticket> = new Map();
+} from "../models/index.js";
+import {
+  validateStatusTransition,
+  getAllowedTransitions,
+} from "../utils/status-transitions.js";
+import {
+  validateCommentInput,
+  validateTicketInput,
+} from "../utils/validation.js";
+import { calculateDueDate } from "../utils/sla.js";
+import { ITicketService } from "./interfaces/index.js";
+import { INotificationService } from "./interfaces/notification-service.interface.js";
+import { IUserService } from "./interfaces/user-service.interface.js";
+import { TicketRepository } from "../database/repositories/ticket-repository.js";
+import { CommentRepository } from "../database/repositories/comment-repository.js";
+import { TicketHistoryRepository } from "../database/repositories/ticket-history-repository.js";
+import { invalidateQueueCache } from "../cache/queue-cache.js";
 
 export class TicketService implements ITicketService {
+  private ticketRepository: TicketRepository;
+  private commentRepository: CommentRepository;
+  private historyRepository: TicketHistoryRepository;
   private notificationService: INotificationService;
   private userService: IUserService;
 
-  constructor(notificationService: INotificationService, userService: IUserService) {
+  constructor(
+    ticketRepository: TicketRepository,
+    commentRepository: CommentRepository,
+    historyRepository: TicketHistoryRepository,
+    notificationService: INotificationService,
+    userService: IUserService,
+  ) {
+    this.ticketRepository = ticketRepository;
+    this.commentRepository = commentRepository;
+    this.historyRepository = historyRepository;
     this.notificationService = notificationService;
     this.userService = userService;
   }
 
   private getNotificationRecipients(
     ticket: Ticket,
-    options: { includeReporter?: boolean; excludeUserId?: string } = {}
+    options: { includeReporter?: boolean; excludeUserId?: string } = {},
   ): string[] {
     const includeReporter = options.includeReporter ?? true;
     const recipients = new Set<string>();
@@ -53,225 +71,297 @@ export class TicketService implements ITicketService {
     return Array.from(recipients);
   }
 
+  private async invalidateQueueCacheSafe(): Promise<void> {
+    try {
+      await invalidateQueueCache();
+    } catch (err) {
+      console.warn("[ticket] Queue cache invalidation failed:", err);
+    }
+  }
+
   async createTicket(data: TicketCreateInput): Promise<TicketResult> {
     // Validate input
     const validation = validateTicketInput(data);
     if (!validation.isValid) {
       const errorMessages = Object.entries(validation.errors)
         .map(([field, msg]) => `${field}: ${msg}`)
-        .join('; ');
+        .join("; ");
       return { success: false, error: errorMessages };
     }
 
     // Verify reporter exists and is active
     const reporter = await this.userService.getUser(data.reporterId);
     if (!reporter) {
-      return { success: false, error: 'Reporter not found' };
+      return { success: false, error: "Reporter not found" };
     }
 
-    // Create ticket
+    // Build ticket data
     const now = new Date();
-    const ticket: Ticket = {
-      id: crypto.randomUUID(),
+    const id = crypto.randomUUID();
+    const location = data.location?.trim() || undefined;
+    const dueDate = calculateDueDate(data.priority, now);
+
+    // Persist via repository
+    const persisted = await this.ticketRepository.create({
+      id,
       title: data.title,
       description: data.description,
       category: data.category,
       priority: data.priority,
       status: TicketStatus.NEW,
-      location: data.location?.trim() || undefined,
+      location,
       reporterId: data.reporterId,
       createdAt: now,
       updatedAt: now,
-      dueDate: calculateDueDate(data.priority, now),
-      comments: [],
-      history: [],
-    };
+      dueDate,
+    });
 
-    // Persist
-    tickets.set(ticket.id, ticket);
+    // Invalidate queue cache so the new ticket appears in queue queries
+    await this.invalidateQueueCacheSafe();
 
     // Notify admins
     try {
-      await this.notificationService.notifyTicketCreated(ticket.id);
+      await this.notificationService.notifyTicketCreated(persisted.id);
     } catch {
       // Notification failure should not block ticket creation
     }
 
-    return { success: true, ticket };
+    return { success: true, ticket: persisted };
   }
 
   async getTicket(id: string): Promise<TicketResult> {
-    const ticket = tickets.get(id);
+    const ticket = await this.ticketRepository.findById(id);
     if (!ticket) {
-      return { success: false, error: 'Ticket not found' };
+      return { success: false, error: "Ticket not found" };
     }
+
+    // Load comments and history (Req 9.5). If either fails, return failure
+    // without a partially populated ticket (Req 9.6).
+    try {
+      const [comments, history] = await Promise.all([
+        this.commentRepository.findByTicketId(id),
+        this.historyRepository.findByTicketId(id),
+      ]);
+      ticket.comments = comments;
+      ticket.history = history;
+    } catch {
+      return { success: false, error: "Failed to load ticket details" };
+    }
+
     return { success: true, ticket };
   }
 
-  async updateTicket(id: string, data: TicketUpdateInput): Promise<TicketResult> {
+  async updateTicket(
+    _id: string,
+    _data: TicketUpdateInput,
+  ): Promise<TicketResult> {
     // Stub - to be implemented
-    return { success: false, error: 'Not implemented' };
+    return { success: false, error: "Not implemented" };
   }
 
-  async assignTicket(id: string, assigneeId: string, assignedBy: string): Promise<TicketResult> {
-    // 1. Find ticket by ID
-    const ticket = tickets.get(id);
+  async assignTicket(
+    id: string,
+    assigneeId: string,
+    assignedBy: string,
+  ): Promise<TicketResult> {
+    // 1. Find ticket
+    const ticket = await this.ticketRepository.findById(id);
     if (!ticket) {
-      return { success: false, error: 'Ticket not found' };
+      return { success: false, error: "Ticket not found" };
     }
 
-    // 2. Check if ticket status is CLOSED or RESOLVED
-    if (ticket.status === TicketStatus.CLOSED || ticket.status === TicketStatus.RESOLVED) {
-      return { success: false, error: 'Cannot assign ticket with status CLOSED or RESOLVED' };
+    // 2. Reject CLOSED/RESOLVED
+    if (
+      ticket.status === TicketStatus.CLOSED ||
+      ticket.status === TicketStatus.RESOLVED
+    ) {
+      return {
+        success: false,
+        error: "Cannot assign ticket with status CLOSED or RESOLVED",
+      };
     }
 
     // 3. Verify assignee exists
     const assignee = await this.userService.getUser(assigneeId);
     if (!assignee) {
-      return { success: false, error: 'Assignee not found' };
+      return { success: false, error: "Assignee not found" };
     }
 
-    // 4. Verify assignee has TECHNICIAN or ADMIN role
-    if (assignee.role !== UserRole.TECHNICIAN && assignee.role !== UserRole.ADMIN) {
-      return { success: false, error: 'Assignee must have TECHNICIAN or ADMIN role' };
+    // 4. Verify assignee role
+    if (
+      assignee.role !== UserRole.TECHNICIAN &&
+      assignee.role !== UserRole.ADMIN
+    ) {
+      return {
+        success: false,
+        error: "Assignee must have TECHNICIAN or ADMIN role",
+      };
     }
 
-    // 5. Store previous assignee ID
     const previousAssignee = ticket.assigneeId;
 
-    // 6. Update ticket assignee
-    ticket.assigneeId = assigneeId;
-
-    // 7. Update ticket status to IN_PROGRESS
-    ticket.status = TicketStatus.IN_PROGRESS;
-
-    // 8. Add history entry
-    const historyEntry = createHistoryEntry({
-      ticketId: ticket.id,
-      action: HistoryActionType.ASSIGNED,
-      previousValue: previousAssignee || '',
-      newValue: assigneeId,
-      userId: assignedBy,
+    // 5. Persist update
+    const updated = await this.ticketRepository.update(id, {
+      assigneeId,
+      status: TicketStatus.IN_PROGRESS,
     });
-    ticket.history.push(historyEntry);
+    if (!updated) {
+      return { success: false, error: "Ticket not found" };
+    }
 
-    // 9. Update ticket updatedAt
-    ticket.updatedAt = new Date();
-
-    // 10. Notify new assignee
+    // 6. Append history entry — failure is fatal (do not silently lose audit trail)
     try {
-      await this.notificationService.notifyTicketAssigned(ticket.id, assigneeId);
+      await this.historyRepository.append({
+        id: crypto.randomUUID(),
+        ticketId: id,
+        action: HistoryActionType.ASSIGNED,
+        previousValue: previousAssignee || "",
+        newValue: assigneeId,
+        userId: assignedBy,
+        timestamp: new Date(),
+      });
+    } catch {
+      return { success: false, error: "Failed to record assignment history" };
+    }
+
+    // Invalidate queue cache — assignee/status change affects queue results
+    await this.invalidateQueueCacheSafe();
+
+    // 7. Notify new assignee
+    try {
+      await this.notificationService.notifyTicketAssigned(id, assigneeId);
     } catch {
       // Notification failure should not block assignment
     }
 
-    // 11. If there was a previous assignee (reassignment), notify them too
+    // 8. Notify previous assignee on reassignment
     if (previousAssignee && previousAssignee !== assigneeId) {
       try {
-        await this.notificationService.notifyTicketAssigned(ticket.id, previousAssignee);
+        await this.notificationService.notifyTicketAssigned(
+          id,
+          previousAssignee,
+        );
       } catch {
         // Notification failure should not block assignment
       }
     }
 
-    // 12. Return success
-    return { success: true, ticket };
+    return { success: true, ticket: updated };
   }
 
-  async changeStatus(id: string, status: TicketStatus, userId: string): Promise<TicketResult> {
-    // Step 1: Find ticket by ID
-    const ticket = tickets.get(id);
+  async changeStatus(
+    id: string,
+    status: TicketStatus,
+    userId: string,
+  ): Promise<TicketResult> {
+    // 1. Find ticket
+    const ticket = await this.ticketRepository.findById(id);
     if (!ticket) {
-      return { success: false, error: 'Ticket not found' };
+      return { success: false, error: "Ticket not found" };
     }
 
-    // Step 2: Validate the transition using state machine
+    // 2. Validate transition
     const currentStatus = ticket.status;
     if (!validateStatusTransition(currentStatus, status)) {
       return {
         success: false,
-        error: `Invalid status transition from ${currentStatus} to ${status}. Allowed: ${getAllowedTransitions(currentStatus).join(', ')}`,
+        error: `Invalid status transition from ${currentStatus} to ${status}. Allowed: ${getAllowedTransitions(currentStatus).join(", ")}`,
       };
     }
 
-    // Step 3: Update ticket status
-    const oldStatus = ticket.status;
-    ticket.status = status;
-
-    // Step 4: If new status is RESOLVED, set resolvedAt
+    // 3. Build update payload, mirroring previous resolvedAt rules
+    const updatePayload: Parameters<TicketRepository["update"]>[1] = { status };
     if (status === TicketStatus.RESOLVED) {
-      ticket.resolvedAt = new Date();
+      updatePayload.resolvedAt = new Date();
+    } else if (status === TicketStatus.REOPENED) {
+      updatePayload.resolvedAt = null;
     }
 
-    // Step 5: If new status is REOPENED, clear resolvedAt
-    if (status === TicketStatus.REOPENED) {
-      ticket.resolvedAt = undefined;
+    const updated = await this.ticketRepository.update(id, updatePayload);
+    if (!updated) {
+      return { success: false, error: "Ticket not found" };
     }
 
-    // Step 6: Add history entry
-    const historyEntry = createHistoryEntry({
-      ticketId: ticket.id,
-      action: HistoryActionType.STATUS_CHANGED,
-      previousValue: oldStatus,
-      newValue: status,
-      userId,
+    // 4. Append history entry — failure is fatal
+    try {
+      await this.historyRepository.append({
+        id: crypto.randomUUID(),
+        ticketId: id,
+        action: HistoryActionType.STATUS_CHANGED,
+        previousValue: currentStatus,
+        newValue: status,
+        userId,
+        timestamp: new Date(),
+      });
+    } catch {
+      return {
+        success: false,
+        error: "Failed to record status change history",
+      };
+    }
+
+    // Invalidate queue cache — status change affects queue results
+    await this.invalidateQueueCacheSafe();
+
+    // 5. Notifications
+    const recipientIds = this.getNotificationRecipients(updated, {
+      excludeUserId: userId,
     });
-    ticket.history.push(historyEntry);
-
-    // Step 7: Update updatedAt
-    ticket.updatedAt = new Date();
-
-    // Step 8: Trigger notifications
-    const recipientIds = this.getNotificationRecipients(ticket, { excludeUserId: userId });
     if (status === TicketStatus.RESOLVED) {
-      await this.notificationService.notifyTicketResolved(ticket.id, recipientIds);
+      await this.notificationService.notifyTicketResolved(id, recipientIds);
     } else {
-      await this.notificationService.notifyStatusChanged(ticket.id, status, recipientIds);
+      await this.notificationService.notifyStatusChanged(
+        id,
+        status,
+        recipientIds,
+      );
     }
 
-    // Step 9: Return success
-    return { success: true, ticket };
+    return { success: true, ticket: updated };
   }
 
-  async addComment(id: string, comment: CommentInput, userId: string): Promise<CommentResult> {
-    // 1. Find ticket by ID
-    const ticket = tickets.get(id);
+  async addComment(
+    id: string,
+    comment: CommentInput,
+    userId: string,
+  ): Promise<CommentResult> {
+    // 1. Verify ticket exists (don't load comments/history — too expensive)
+    const ticket = await this.ticketRepository.findById(id);
     if (!ticket) {
-      return { success: false, error: 'Ticket not found' };
+      return { success: false, error: "Ticket not found" };
     }
 
-    // 2. Validate comment content
+    // 2. Validate content
     const validation = validateCommentInput(comment.content);
     if (!validation.isValid) {
       const errorMessage = Object.values(validation.errors)[0];
       return { success: false, error: errorMessage };
     }
 
-    // 3. If internal comment, check user has TECHNICIAN or ADMIN role
+    // 3. Internal comments require TECHNICIAN/ADMIN
     if (comment.isInternal) {
       const user = await this.userService.getUser(userId);
-      if (!user || (user.role !== UserRole.TECHNICIAN && user.role !== UserRole.ADMIN)) {
-        return { success: false, error: 'Only TECHNICIAN or ADMIN can create internal comments' };
+      if (
+        !user ||
+        (user.role !== UserRole.TECHNICIAN && user.role !== UserRole.ADMIN)
+      ) {
+        return {
+          success: false,
+          error: "Only TECHNICIAN or ADMIN can create internal comments",
+        };
       }
     }
 
-    // 4. Create the Comment object
-    const newComment: Comment = {
+    // 4. Persist comment
+    const newComment: Comment = await this.commentRepository.create({
       id: crypto.randomUUID(),
       ticketId: id,
       authorId: userId,
       content: comment.content,
       isInternal: comment.isInternal,
-      createdAt: new Date(),
-    };
+    });
 
-    // 5. Add comment to ticket's comments array
-    ticket.comments.push(newComment);
-
-    // 6. Update ticket.updatedAt
-    ticket.updatedAt = new Date();
-
-    // 7. Trigger notifications
+    // 5. Notifications
     try {
       await this.notificationService.notifyCommentAdded(
         id,
@@ -279,33 +369,33 @@ export class TicketService implements ITicketService {
         this.getNotificationRecipients(ticket, {
           excludeUserId: userId,
           includeReporter: !newComment.isInternal,
-        })
+        }),
       );
     } catch {
       // Notification failure should not block comment creation
     }
 
-    // 8. Return success
     return { success: true, comment: newComment };
   }
 
   async getTicketsByUser(userId: string): Promise<TicketListResult> {
     // Look up user to determine role-based filtering
     const user = await this.userService.getUser(userId);
-    const allTickets = Array.from(tickets.values());
 
     let filtered: Ticket[];
     if (!user) {
       filtered = [];
-    } else if (user.role === UserRole.ADMIN) {
-      // Admin sees everything
-      filtered = allTickets;
-    } else if (user.role === UserRole.TECHNICIAN) {
-      // Technician can view the operational queue, but write actions are still assignment-gated.
-      filtered = allTickets;
+    } else if (
+      user.role === UserRole.ADMIN ||
+      user.role === UserRole.TECHNICIAN
+    ) {
+      // Admins see everything; technicians can view the operational queue
+      filtered = await this.ticketRepository.findByFilters({});
     } else {
       // Reporter sees only own tickets
-      filtered = allTickets.filter((t) => t.reporterId === userId);
+      filtered = await this.ticketRepository.findByFilters({
+        reporterId: userId,
+      });
     }
 
     // Sort by createdAt DESC (newest first)
@@ -321,15 +411,16 @@ export class TicketService implements ITicketService {
   }
 
   async getTicketHistory(id: string): Promise<TicketHistoryEntry[]> {
-    const ticket = tickets.get(id);
-    if (!ticket) {
-      return [];
-    }
-    return getTicketHistory(ticket.history);
+    return this.historyRepository.findByTicketId(id);
   }
 
-  // Helper to access the in-memory store (for testing and other services)
+  /**
+   * @deprecated Vestigial accessor retained as a no-op shim during the
+   * in-memory → repository migration. Returns an empty Map so that legacy
+   * callers (e.g. `userService['ticketLookup']` in `src/index.ts`) do not
+   * crash before task 9.1 removes them. Do not add new callers.
+   */
   getTicketStore(): Map<string, Ticket> {
-    return tickets;
+    return new Map();
   }
 }

@@ -1,8 +1,18 @@
-import { Ticket, TicketResult } from '../models/ticket.js';
-import { Priority, TicketStatus, HistoryActionType } from '../models/enums.js';
-import { QueueFilters, QueueStats, TicketListResult } from '../models/queue.js';
-import { IQueueService } from './interfaces/queue-service.interface.js';
-import { createHistoryEntry } from '../utils/history.js';
+import { Ticket, TicketResult } from "../models/ticket.js";
+import { Priority, TicketStatus, HistoryActionType } from "../models/enums.js";
+import { QueueFilters, QueueStats, TicketListResult } from "../models/queue.js";
+import { IQueueService } from "./interfaces/queue-service.interface.js";
+import { createHistoryEntry } from "../utils/history.js";
+import {
+  TicketRepository,
+  TicketFilters,
+} from "../database/repositories/ticket-repository.js";
+import { TicketHistoryRepository } from "../database/repositories/ticket-history-repository.js";
+import {
+  deriveQueueCacheKey,
+  getCachedQueueResults,
+  setCachedQueueResults,
+} from "../cache/queue-cache.js";
 
 /**
  * Priority numeric values for sorting.
@@ -29,14 +39,15 @@ const PRIORITY_ORDER: Record<Priority, number> = {
 export function sortTickets(
   tickets: Ticket[],
   sortBy?: string,
-  sortOrder?: string
+  sortOrder?: string,
 ): Ticket[] {
   const sorted = [...tickets];
 
   if (!sortBy) {
     // Default: sort by priority DESC then createdAt ASC
     sorted.sort((a, b) => {
-      const priorityDiff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+      const priorityDiff =
+        PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
       if (priorityDiff !== 0) {
         return priorityDiff; // Lower number = higher priority = comes first (DESC)
       }
@@ -46,38 +57,38 @@ export function sortTickets(
   }
 
   // Determine effective sort direction
-  const defaultDirections: Record<string, 'asc' | 'desc'> = {
-    priority: 'desc',
-    createdAt: 'asc',
-    updatedAt: 'desc',
-    dueDate: 'asc',
+  const defaultDirections: Record<string, "asc" | "desc"> = {
+    priority: "desc",
+    createdAt: "asc",
+    updatedAt: "desc",
+    dueDate: "asc",
   };
 
-  const effectiveOrder = sortOrder || defaultDirections[sortBy] || 'asc';
-  const multiplier = effectiveOrder === 'desc' ? -1 : 1;
+  const effectiveOrder = sortOrder || defaultDirections[sortBy] || "asc";
+  const multiplier = effectiveOrder === "desc" ? -1 : 1;
 
   sorted.sort((a, b) => {
     switch (sortBy) {
-      case 'priority': {
+      case "priority": {
         const diff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
         // PRIORITY_ORDER: CRITICAL=0, HIGH=1, MEDIUM=2, LOW=3
         // For DESC (default): we want CRITICAL first, so natural ascending order of numeric values
         // For ASC: we want LOW first, so reverse the natural order
         // effectiveOrder='desc' → multiplier=-1 → diff*-1 flips, but we need natural order for desc
         // So we invert: for priority, desc means natural order (lower number first)
-        return effectiveOrder === 'desc' ? diff : -diff;
+        return effectiveOrder === "desc" ? diff : -diff;
       }
-      case 'createdAt': {
+      case "createdAt": {
         const aTime = a.createdAt.getTime();
         const bTime = b.createdAt.getTime();
         return (aTime - bTime) * multiplier;
       }
-      case 'updatedAt': {
+      case "updatedAt": {
         const aTime = a.updatedAt.getTime();
         const bTime = b.updatedAt.getTime();
         return (aTime - bTime) * multiplier;
       }
-      case 'dueDate': {
+      case "dueDate": {
         // Handle undefined dueDate: tickets without dueDate go to the end
         const aTime = a.dueDate ? a.dueDate.getTime() : Number.MAX_SAFE_INTEGER;
         const bTime = b.dueDate ? b.dueDate.getTime() : Number.MAX_SAFE_INTEGER;
@@ -92,43 +103,18 @@ export function sortTickets(
 }
 
 export class QueueService implements IQueueService {
-  private tickets: Ticket[] = [];
+  private readonly ticketRepository: TicketRepository;
+  private readonly historyRepository: TicketHistoryRepository;
 
-  constructor(tickets?: Ticket[]) {
-    if (tickets) {
-      this.tickets = tickets;
-    }
-  }
-
-  setTickets(tickets: Ticket[]): void {
-    this.tickets = tickets;
+  constructor(
+    ticketRepository: TicketRepository,
+    historyRepository: TicketHistoryRepository,
+  ) {
+    this.ticketRepository = ticketRepository;
+    this.historyRepository = historyRepository;
   }
 
   async getPendingTickets(filters: QueueFilters): Promise<TicketListResult> {
-    // Step 1: Exclude RESOLVED and CLOSED tickets
-    let result = this.tickets.filter(
-      (t) => t.status !== TicketStatus.RESOLVED && t.status !== TicketStatus.CLOSED
-    );
-
-    // Step 2: Apply filters (AND logic)
-    if (filters.priority) {
-      result = result.filter((t) => t.priority === filters.priority);
-    }
-    if (filters.category) {
-      result = result.filter((t) => t.category === filters.category);
-    }
-    if (filters.assigneeId) {
-      result = result.filter((t) => t.assigneeId === filters.assigneeId);
-    }
-    if (filters.status) {
-      result = result.filter((t) => t.status === filters.status);
-    }
-
-    // Step 3: Apply sorting
-    result = sortTickets(result, filters.sortBy, filters.sortOrder);
-
-    // Step 4: Apply pagination
-    const totalCount = result.length;
     const page = filters.page || 1;
     const pageSize = filters.pageSize || 20;
 
@@ -142,17 +128,69 @@ export class QueueService implements IQueueService {
       };
     }
 
+    // Build repository filters. Always exclude RESOLVED and CLOSED to honor
+    // the queue contract (Req 9.3).
+    const repoFilters: TicketFilters = {
+      excludeStatuses: [TicketStatus.RESOLVED, TicketStatus.CLOSED],
+    };
+    if (filters.priority) repoFilters.priority = filters.priority;
+    if (filters.category) repoFilters.category = filters.category;
+    if (filters.assigneeId) repoFilters.assigneeId = filters.assigneeId;
+    if (filters.status) repoFilters.status = filters.status;
+
+    // Try cache first (Req 10.1, 10.2). On any Redis error, log and fall
+    // through to the PostgreSQL path (Req 10.5).
+    // TODO: Date hydration on cache reads (follow-up). Currently dates are
+    // returned as ISO strings on cache hits.
+    const cacheKey = deriveQueueCacheKey(filters);
+    try {
+      const cached = await getCachedQueueResults<TicketListResult>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    } catch (err) {
+      console.warn(
+        "[queue] Cache read failed, falling back to PostgreSQL:",
+        err,
+      );
+    }
+
+    let result: Ticket[];
+    try {
+      result = await this.ticketRepository.findByFilters(repoFilters);
+    } catch (err) {
+      console.warn(
+        "[queue] Database query failed, returning empty result:",
+        err,
+      );
+      return { tickets: [], totalCount: 0, page, pageSize, totalPages: 1 };
+    }
+
+    // Apply in-memory sort and pagination.
+    result = sortTickets(result, filters.sortBy, filters.sortOrder);
+
+    const totalCount = result.length;
     const totalPages = Math.ceil(totalCount / pageSize);
     const offset = (page - 1) * pageSize;
     const paginatedTickets = result.slice(offset, offset + pageSize);
 
-    return {
+    const response: TicketListResult = {
       tickets: paginatedTickets,
       totalCount,
       page,
       pageSize,
       totalPages,
     };
+
+    // Populate cache with TTL of 30s (Req 10.3). Failures must not block
+    // the response.
+    try {
+      await setCachedQueueResults(cacheKey, response, 30);
+    } catch (err) {
+      console.warn("[queue] Cache write failed:", err);
+    }
+
+    return response;
   }
 
   async getQueueStatistics(): Promise<QueueStats> {
@@ -165,9 +203,30 @@ export class QueueService implements IQueueService {
       TicketStatus.REOPENED,
     ]);
 
+    let allTickets: Ticket[];
+    try {
+      // Load all tickets and filter by date in-memory. A more efficient SQL
+      // aggregate is a follow-up.
+      allTickets = await this.ticketRepository.findByFilters({});
+    } catch (err) {
+      console.warn(
+        "[queue] Database query failed for statistics, returning empty stats:",
+        err,
+      );
+      return {
+        totalTickets: 0,
+        openTickets: 0,
+        resolvedTickets: 0,
+        slaCompliancePercentage: 100,
+        averageTimeToFirstResponse: 0,
+        byPriority: {},
+        byStatus: {},
+      };
+    }
+
     // Filter to tickets created in the last 30 days
-    const recentTickets = this.tickets.filter(
-      (t) => t.createdAt.getTime() >= thirtyDaysAgo.getTime()
+    const recentTickets = allTickets.filter(
+      (t) => t.createdAt.getTime() >= thirtyDaysAgo.getTime(),
     );
     const byPriority: Partial<Record<Priority, number>> = {};
     const byStatus: Partial<Record<TicketStatus, number>> = {};
@@ -185,9 +244,11 @@ export class QueueService implements IQueueService {
       slaCompliancePercentage = 100;
     } else {
       const compliantTickets = resolvedTickets.filter(
-        (t) => t.dueDate != null && t.resolvedAt!.getTime() <= t.dueDate.getTime()
+        (t) =>
+          t.dueDate != null && t.resolvedAt!.getTime() <= t.dueDate.getTime(),
       );
-      slaCompliancePercentage = (compliantTickets.length / resolvedTickets.length) * 100;
+      slaCompliancePercentage =
+        (compliantTickets.length / resolvedTickets.length) * 100;
     }
 
     // Calculate average time to first technician response.
@@ -198,25 +259,31 @@ export class QueueService implements IQueueService {
         (entry) =>
           entry.action === HistoryActionType.ASSIGNED ||
           (entry.action === HistoryActionType.STATUS_CHANGED &&
-            entry.newValue === TicketStatus.IN_PROGRESS)
+            entry.newValue === TicketStatus.IN_PROGRESS),
       );
 
       if (firstInProgress) {
-        const timeDiff = firstInProgress.timestamp.getTime() - ticket.createdAt.getTime();
+        const timeDiff =
+          firstInProgress.timestamp.getTime() - ticket.createdAt.getTime();
         timesToFirstResponse.push(timeDiff);
       }
     }
 
     const averageTimeToFirstResponse =
       timesToFirstResponse.length > 0
-        ? timesToFirstResponse.reduce((sum, t) => sum + t, 0) / timesToFirstResponse.length
+        ? timesToFirstResponse.reduce((sum, t) => sum + t, 0) /
+          timesToFirstResponse.length
         : 0;
 
     return {
       totalTickets: recentTickets.length,
-      openTickets: recentTickets.filter((ticket) => openStatuses.has(ticket.status)).length,
+      openTickets: recentTickets.filter((ticket) =>
+        openStatuses.has(ticket.status),
+      ).length,
       resolvedTickets: recentTickets.filter(
-        (ticket) => ticket.status === TicketStatus.RESOLVED || ticket.status === TicketStatus.CLOSED
+        (ticket) =>
+          ticket.status === TicketStatus.RESOLVED ||
+          ticket.status === TicketStatus.CLOSED,
       ).length,
       slaCompliancePercentage,
       averageTimeToFirstResponse,
@@ -226,15 +293,21 @@ export class QueueService implements IQueueService {
   }
 
   async escalateTicket(ticketId: string): Promise<TicketResult> {
-    // Step 1: Find ticket
-    const ticket = this.tickets.find((t) => t.id === ticketId);
+    // Step 1: Find ticket via repository
+    const ticket = await this.ticketRepository.findById(ticketId);
     if (!ticket) {
-      return { success: false, error: 'Ticket not found' };
+      return { success: false, error: "Ticket not found" };
     }
 
     // Step 2: Skip RESOLVED or CLOSED
-    if (ticket.status === TicketStatus.RESOLVED || ticket.status === TicketStatus.CLOSED) {
-      return { success: false, error: 'Cannot escalate resolved or closed tickets' };
+    if (
+      ticket.status === TicketStatus.RESOLVED ||
+      ticket.status === TicketStatus.CLOSED
+    ) {
+      return {
+        success: false,
+        error: "Cannot escalate resolved or closed tickets",
+      };
     }
 
     // Step 3: Check escalation conditions
@@ -242,50 +315,69 @@ export class QueueService implements IQueueService {
     const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
     const ONE_HOUR_MS = 60 * 60 * 1000;
 
-    const slaBreached = ticket.dueDate != null && now.getTime() > ticket.dueDate.getTime();
-    const inactivity48h = now.getTime() - ticket.updatedAt.getTime() > FORTY_EIGHT_HOURS_MS;
+    const slaBreached =
+      ticket.dueDate != null && now.getTime() > ticket.dueDate.getTime();
+    const inactivity48h =
+      now.getTime() - ticket.updatedAt.getTime() > FORTY_EIGHT_HOURS_MS;
     const highCriticalUnassigned =
-      (ticket.priority === Priority.HIGH || ticket.priority === Priority.CRITICAL) &&
+      (ticket.priority === Priority.HIGH ||
+        ticket.priority === Priority.CRITICAL) &&
       !ticket.assigneeId &&
       now.getTime() - ticket.createdAt.getTime() > ONE_HOUR_MS;
 
     // Step 4: If no condition met, return error
     if (!slaBreached && !inactivity48h && !highCriticalUnassigned) {
-      return { success: false, error: 'No escalation condition met' };
+      return { success: false, error: "No escalation condition met" };
     }
 
     // Step 5: Determine escalation reason
     let escalationReason: string;
     if (slaBreached) {
-      escalationReason = 'SLA breach: ticket due date has passed';
+      escalationReason = "SLA breach: ticket due date has passed";
     } else if (inactivity48h) {
-      escalationReason = 'Inactivity: no activity for more than 48 hours';
+      escalationReason = "Inactivity: no activity for more than 48 hours";
     } else {
-      escalationReason = 'Unassigned high priority: HIGH/CRITICAL ticket unassigned for more than 1 hour';
+      escalationReason =
+        "Unassigned high priority: HIGH/CRITICAL ticket unassigned for more than 1 hour";
     }
 
     // Step 6 & 7: Increase priority if not already CRITICAL
     const oldPriority = ticket.priority;
-    if (ticket.priority !== Priority.CRITICAL) {
-      ticket.priority = getNextPriority(ticket.priority);
+    const newPriority =
+      ticket.priority === Priority.CRITICAL
+        ? Priority.CRITICAL
+        : getNextPriority(ticket.priority);
+
+    // Persist priority change via repository.
+    const updated = await this.ticketRepository.update(ticketId, {
+      priority: newPriority,
+    });
+    if (!updated) {
+      return { success: false, error: "Ticket not found" };
     }
 
-    // Step 8: Record escalation in history
+    // Step 8: Persist escalation in history table.
     const historyEntry = createHistoryEntry({
-      ticketId: ticket.id,
+      ticketId: updated.id,
       action: HistoryActionType.ESCALATED,
       previousValue: oldPriority,
-      newValue: ticket.priority,
-      userId: 'SYSTEM',
+      newValue: newPriority,
+      userId: "SYSTEM",
       reason: escalationReason,
     });
-    ticket.history.push(historyEntry);
+    await this.historyRepository.append({
+      id: historyEntry.id,
+      ticketId: historyEntry.ticketId,
+      action: historyEntry.action,
+      previousValue: historyEntry.previousValue,
+      newValue: historyEntry.newValue,
+      userId: historyEntry.userId,
+      timestamp: historyEntry.timestamp,
+      reason: historyEntry.reason,
+    });
 
-    // Step 9: Update updatedAt
-    ticket.updatedAt = new Date();
-
-    // Step 10: Return success
-    return { success: true, ticket };
+    // Return updated ticket (priority and updatedAt already refreshed by repo).
+    return { success: true, ticket: updated };
   }
 }
 

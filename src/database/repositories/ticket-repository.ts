@@ -1,6 +1,21 @@
-import { query, getClient } from '../connection.js';
-import { Ticket } from '../../models/ticket.js';
-import { TicketCategory, Priority, TicketStatus } from '../../models/enums.js';
+import { query } from "../connection.js";
+import { Ticket } from "../../models/ticket.js";
+import { TicketCategory, Priority, TicketStatus } from "../../models/enums.js";
+
+/**
+ * Marker error class for validation failures (e.g. malformed UUID input).
+ * Callers can distinguish these from generic database errors by checking
+ * `error.name === 'ValidationError'` or `error instanceof ValidationError`.
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+const UUID_V4_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface TicketRow {
   id: string;
@@ -49,9 +64,13 @@ function mapRowToTicket(row: TicketRow): Ticket {
 
 export class TicketRepository {
   async findById(id: string): Promise<Ticket | null> {
+    if (typeof id !== "string" || !UUID_V4_REGEX.test(id)) {
+      throw new ValidationError("Invalid ticket ID: not a well-formed UUID");
+    }
+
     const result = await query<TicketRow>(
-      'SELECT * FROM tickets WHERE id = $1',
-      [id]
+      "SELECT * FROM tickets WHERE id = $1",
+      [id],
     );
     if (result.rows.length === 0) return null;
     return mapRowToTicket(result.rows[0]);
@@ -86,7 +105,7 @@ export class TicketRepository {
         ticket.createdAt,
         ticket.updatedAt,
         ticket.dueDate ?? null,
-      ]
+      ],
     );
     return mapRowToTicket(result.rows[0]);
   }
@@ -101,29 +120,30 @@ export class TicketRepository {
       status: TicketStatus;
       location: string | null;
       assigneeId: string | null;
-      updatedAt: Date;
       resolvedAt: Date | null;
       dueDate: Date | null;
-    }>
+    }>,
   ): Promise<Ticket | null> {
     const setClauses: string[] = [];
     const values: unknown[] = [];
     let paramIndex = 1;
 
+    // Note: `updated_at` is intentionally NOT in this map. It is set
+    // server-side via `NOW()` below so callers cannot override it.
     const columnMap: Record<string, string> = {
-      title: 'title',
-      description: 'description',
-      category: 'category',
-      priority: 'priority',
-      status: 'status',
-      location: 'location',
-      assigneeId: 'assignee_id',
-      updatedAt: 'updated_at',
-      resolvedAt: 'resolved_at',
-      dueDate: 'due_date',
+      title: "title",
+      description: "description",
+      category: "category",
+      priority: "priority",
+      status: "status",
+      location: "location",
+      assigneeId: "assignee_id",
+      resolvedAt: "resolved_at",
+      dueDate: "due_date",
     };
 
     for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
       const column = columnMap[key];
       if (column) {
         setClauses.push(`${column} = $${paramIndex}`);
@@ -132,12 +152,16 @@ export class TicketRepository {
       }
     }
 
+    // No-op update: return existing record without executing UPDATE.
     if (setClauses.length === 0) return this.findById(id);
+
+    // Always refresh `updated_at` server-side when at least one field changes.
+    setClauses.push("updated_at = NOW()");
 
     values.push(id);
     const result = await query<TicketRow>(
-      `UPDATE tickets SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-      values
+      `UPDATE tickets SET ${setClauses.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      values,
     );
 
     if (result.rows.length === 0) return null;
@@ -181,19 +205,19 @@ export class TicketRepository {
 
     if (filters.excludeStatuses && filters.excludeStatuses.length > 0) {
       const placeholders = filters.excludeStatuses.map(
-        (_, i) => `$${paramIndex + i}`
+        (_, i) => `$${paramIndex + i}`,
       );
-      conditions.push(`status NOT IN (${placeholders.join(', ')})`);
+      conditions.push(`status NOT IN (${placeholders.join(", ")})`);
       values.push(...filters.excludeStatuses);
       paramIndex += filters.excludeStatuses.length;
     }
 
     const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const result = await query<TicketRow>(
       `SELECT * FROM tickets ${whereClause} ORDER BY created_at ASC`,
-      values
+      values,
     );
 
     return result.rows.map(mapRowToTicket);

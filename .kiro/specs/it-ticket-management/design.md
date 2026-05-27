@@ -1,1031 +1,634 @@
-# Design Document: IT Ticket Management
+# Design Document: IT Ticket Management — Persistent Data Layer
 
 ## Overview
 
-System zarządzania zgłoszeniami IT zapewnia prosty interfejs dla pracowników do zgłaszania problemów technicznych oraz rozbudowany dashboard dla administratorów IT do zarządzania kolejka zgłoszeń. System obsługuje pełny cykl życia zgłoszenia: od utworzenia, przez przypisanie, priorytetyzację, aż do rozwiązania i zamknięcia. Automatyczne powiadomienia informują zgłaszających o zmianach statusu, a kolejka zgłoszeń pozwala administratorom efektywnie zarządzać przepływem pracy.
+This design covers the migration from an in-memory storage layer to a fully persistent, production-ready data layer for the IT Ticket Management System. The work spans three interconnected areas:
+
+1. **Database migration system** — versioned, forward-only SQL migrations managed by `node-pg-migrate`, replacing the static `schema.sql` file and running automatically on startup.
+2. **PostgreSQL repository implementation** — full implementations of all repository classes (`TicketRepository`, `UserRepository`, `CommentRepository`, `NotificationRepository`, `TicketHistoryRepository`, `PasswordRepository`) so all services persist data to PostgreSQL.
+3. **Redis caching layer** — the existing queue cache and a new JWT token blacklist wired into the running application, with graceful degradation when Redis is unavailable.
+
+The existing service interfaces (`ITicketService`, `IUserService`, `IQueueService`, `INotificationService`) and all route handlers remain unchanged. The health endpoint is extended to report database and Redis connectivity.
+
+### Key Design Decisions
+
+- **`node-pg-migrate` for migrations**: Chosen over raw SQL scripts or ORMs because it provides versioned, idempotent, forward-only migrations with a well-understood `pgmigrations` tracking table, minimal runtime overhead, and direct SQL control.
+- **`bcrypt` for password hashing**: Passwords are stored in a dedicated `user_passwords` table, isolated from user profile data. bcrypt with cost factor 12 provides a strong security baseline.
+- **Redis for caching and token blacklist**: The existing Redis client is reused for both the queue cache (already scaffolded) and the new JWT token blacklist, using key namespacing (`queue:` vs `blacklist:`) to avoid collisions.
+- **Graceful Redis degradation**: Both the queue cache and token blacklist fall back gracefully when Redis is unavailable, logging warnings rather than returning errors to callers.
+- **Connection pool with configurable max**: `pg.Pool` with a default max of 10 connections, overridable via `PG_POOL_MAX`, with SIGTERM drain support.
+
+---
 
 ## Architecture
 
+The application follows a layered architecture. This feature adds the persistence layer beneath the existing service layer.
+
 ```mermaid
 graph TD
-    subgraph "Warstwa Prezentacji"
-        UI[Interfejs Zgłaszającego]
-        AD[Dashboard Administratora]
-        NP[Serwis Powiadomień UI]
+    subgraph HTTP Layer
+        Routes[Express Routes]
+        Middleware[Auth / Permission Middleware]
     end
-    
-    subgraph "Warstwa Aplikacji"
-        TS[Ticket Service]
-        NS[Notification Service]
-        QS[Queue Service]
-        US[User Service]
+
+    subgraph Service Layer
+        TicketService
+        UserService
+        QueueService
+        NotificationService
     end
-    
-    subgraph "Warstwa Danych"
-        DB[(Baza Danych)]
-        CACHE[(Cache)]
-        QUEUE[(Kolejka Zadań)]
+
+    subgraph Repository Layer
+        TicketRepo[TicketRepository]
+        UserRepo[UserRepository]
+        CommentRepo[CommentRepository]
+        NotifRepo[NotificationRepository]
+        HistoryRepo[TicketHistoryRepository]
+        PasswordRepo[PasswordRepository]
     end
-    
-    UI --> TS
-    AD --> TS
-    AD --> QS
-    TS --> NS
-    NS --> NP
-    TS --> DB
-    TS --> CACHE
-    NS --> QUEUE
-    QS --> DB
-    US --> DB
+
+    subgraph Infrastructure
+        PGPool[pg.Pool — Connection Pool]
+        Redis[Redis Client]
+        QueueCache[Queue Cache]
+        TokenBlacklist[Token Blacklist]
+        MigrationRunner[Migration Runner]
+    end
+
+    subgraph Storage
+        PostgreSQL[(PostgreSQL)]
+        RedisDB[(Redis)]
+    end
+
+    Routes --> Middleware
+    Middleware --> TicketService
+    Middleware --> UserService
+    Middleware --> QueueService
+    Middleware --> NotificationService
+
+    TicketService --> TicketRepo
+    TicketService --> CommentRepo
+    TicketService --> HistoryRepo
+    UserService --> UserRepo
+    UserService --> PasswordRepo
+    QueueService --> TicketRepo
+    QueueService --> QueueCache
+    NotificationService --> NotifRepo
+
+    TicketRepo --> PGPool
+    UserRepo --> PGPool
+    CommentRepo --> PGPool
+    NotifRepo --> PGPool
+    HistoryRepo --> PGPool
+    PasswordRepo --> PGPool
+
+    QueueCache --> Redis
+    TokenBlacklist --> Redis
+    Middleware --> TokenBlacklist
+
+    PGPool --> PostgreSQL
+    Redis --> RedisDB
+
+    MigrationRunner --> PostgreSQL
 ```
 
-## Sequence Diagrams
-
-### Główny przepływ: Tworzenie i obsługa zgłoszenia
+### Startup Sequence
 
 ```mermaid
 sequenceDiagram
-    participant U as Użytkownik
-    participant UI as Interfejs
-    participant TS as Ticket Service
-    participant DB as Baza Danych
-    participant NS as Notification Service
-    participant A as Administrator
-    
-    U->>UI: Wypełnia formularz zgłoszenia
-    UI->>TS: createTicket(ticketData)
-    TS->>TS: validateTicket(ticketData)
-    TS->>DB: INSERT INTO tickets
-    DB-->>TS: ticketId
-    TS->>NS: notifyNewTicket(ticketId)
-    NS->>A: Wysyła powiadomienie email/dashboard
-    NS-->>TS: notificationSent
-    TS-->>UI: ticketCreated(ticketId)
-    UI-->>U: Potwierdzenie utworzenia
+    participant Process
+    participant MigrationRunner
+    participant PostgreSQL
+    participant HTTPServer
+
+    Process->>MigrationRunner: start()
+    MigrationRunner->>PostgreSQL: connect (10s timeout)
+    alt connection fails
+        MigrationRunner-->>Process: log error, exit(1)
+    end
+    MigrationRunner->>PostgreSQL: apply pending migrations (ascending order)
+    alt migration fails
+        MigrationRunner-->>Process: log migration name + SQL error, exit(1)
+    end
+    MigrationRunner-->>Process: log "N migrations applied, last: <name>"
+    Process->>HTTPServer: listen()
 ```
 
-### Przypisanie zgłoszenia do technika
-
-```mermaid
-sequenceDiagram
-    participant A as Administrator
-    participant AD as Dashboard
-    participant QS as Queue Service
-    participant TS as Ticket Service
-    participant DB as Baza Danych
-    participant NS as Notification Service
-    participant T as Technik
-    participant U as Użytkownik
-    
-    A->>AD: Przegląda kolejkę zgłoszeń
-    AD->>QS: getPendingTickets()
-    QS->>DB: SELECT * FROM tickets WHERE status='pending'
-    DB-->>QS: tickets[]
-    QS-->>AD: lista zgłoszeń
-    A->>AD: Przypisuje do technika
-    AD->>TS: assignTicket(ticketId, technicianId)
-    TS->>DB: UPDATE ticket SET assignee=technicianId
-    TS->>NS: notifyAssignment(ticketId, technicianId)
-    NS->>T: Powiadomienie o nowym zgłoszeniu
-    NS->>U: Powiadomienie o postępie
-```
+---
 
 ## Components and Interfaces
 
-### Component 1: Ticket Service
+### Migration Runner
 
-**Purpose**: Zarządza cyklem życia zgłoszeń - tworzenie, aktualizacja, przypisywanie, zamykanie.
+A new module `src/database/migrate.ts` wraps `node-pg-migrate` and is called from `src/index.ts` before the HTTP server starts.
 
-**Interface**:
-```pascal
-INTERFACE TicketService
-  FUNCTION createTicket(data: TicketCreateInput): TicketResult
-  FUNCTION getTicket(id: TicketId): TicketResult
-  FUNCTION updateTicket(id: TicketId, data: TicketUpdateInput): TicketResult
-  FUNCTION assignTicket(id: TicketId, assigneeId: UserId): TicketResult
-  FUNCTION changeStatus(id: TicketId, status: TicketStatus): TicketResult
-  FUNCTION addComment(id: TicketId, comment: CommentInput): CommentResult
-  FUNCTION getTicketsByUser(userId: UserId): TicketListResult
-  FUNCTION getTicketsByStatus(status: TicketStatus): TicketListResult
-END INTERFACE
+```typescript
+// src/database/migrate.ts
+export async function runMigrations(): Promise<void>;
+export async function runMigrationsScript(): Promise<void>; // for npm run migrate
 ```
 
-**Responsibilities**:
-- Walidacja danych zgłoszenia przed utworzeniem
-- Zarządzanie statusem zgłoszenia (automatyczne przejścia)
-- Utrzymywanie historii zmian w zgłoszeniu
-- Weryfikacja uprawnień do modyfikacji zgłoszenia
+**Responsibilities:**
+- Read connection config from `DATABASE_URL` or individual `PG*` env vars
+- Apply pending migrations in ascending timestamp order
+- Log count and last migration name on success
+- Exit process with code 1 on connection failure or migration failure
+- Enforce a 10-second connection timeout
 
-### Component 2: Queue Service
+### Repository Classes
 
-**Purpose**: Zarządza kolejką zgłoszeń, sortowanie, filtrowanie, priorytetyzacja.
+All repositories receive a `pg.Pool` instance via constructor injection, enabling testability with mock pools.
 
-**Interface**:
-```pascal
-INTERFACE QueueService
-  FUNCTION getPendingTickets(filters: QueueFilters): TicketListResult
-  FUNCTION getTicketsByPriority(priority: Priority): TicketListResult
-  FUNCTION getTicketsByAssignee(assigneeId: UserId): TicketListResult
-  FUNCTION reorderTicket(ticketId: TicketId, newPosition: Integer): QueueResult
-  FUNCTION getQueueStatistics(): QueueStats
-  FUNCTION escalateTicket(ticketId: TicketId): TicketResult
-END INTERFACE
+```typescript
+// src/database/repositories/ticket-repository.ts
+export class TicketRepository {
+  constructor(pool: pg.Pool) {}
+  async create(ticket: TicketCreateData): Promise<Ticket>
+  async findById(id: string): Promise<Ticket | null>
+  async update(id: string, fields: Partial<TicketUpdateData>): Promise<Ticket | null>
+  async findByFilters(filters: TicketFilters): Promise<Ticket[]>
+}
+
+// src/database/repositories/user-repository.ts
+export class UserRepository {
+  constructor(pool: pg.Pool) {}
+  async create(user: UserCreateData): Promise<User>
+  async findById(id: string): Promise<User | null>
+  async findByEmail(email: string): Promise<User | null>
+  async findByRole(role: UserRole): Promise<User[]>
+  async update(id: string, fields: Partial<UserUpdateData>): Promise<User | null>
+}
+
+// src/database/repositories/password-repository.ts
+export class PasswordRepository {
+  constructor(pool: pg.Pool) {}
+  async setPassword(userId: string, plaintext: string): Promise<void>
+  async verifyPassword(userId: string, plaintext: string): Promise<boolean>
+}
+
+// src/database/repositories/comment-repository.ts
+export class CommentRepository {
+  constructor(pool: pg.Pool) {}
+  async create(comment: CommentCreateData): Promise<Comment>
+  async findByTicketId(ticketId: string, includeInternal?: boolean): Promise<Comment[]>
+}
+
+// src/database/repositories/notification-repository.ts
+export class NotificationRepository {
+  constructor(pool: pg.Pool) {}
+  async create(notification: NotificationCreateData): Promise<Notification>
+  async findByUserId(userId: string, page?: number, pageSize?: number): Promise<NotificationListResult>
+  async markAsRead(notificationId: string, userId: string): Promise<Notification | null>
+}
+
+// src/database/repositories/ticket-history-repository.ts
+export class TicketHistoryRepository {
+  constructor(pool: pg.Pool) {}
+  async append(entry: HistoryEntryCreateData): Promise<TicketHistoryEntry>
+  async findByTicketId(ticketId: string): Promise<TicketHistoryEntry[]>
+}
 ```
 
-**Responsibilities**:
-- Pobieranie zgłoszeń z filtrami i sortowaniem
-- Obliczanie statystyk kolejki (SLA, czas odpowiedzi)
-- Automatyczna eskalacja zgłoszeń przekraczających SLA
-- Zarządzanie priorytetami w kolejce
+### Token Blacklist
 
-### Component 3: Notification Service
+A new module `src/cache/token-blacklist.ts` provides the JWT blacklist backed by Redis.
 
-**Purpose**: Wysyła powiadomienia do użytkowników o zmianach w zgłoszeniach.
-
-**Interface**:
-```pascal
-INTERFACE NotificationService
-  FUNCTION notifyTicketCreated(ticketId: TicketId): NotificationResult
-  FUNCTION notifyTicketAssigned(ticketId: TicketId, assigneeId: UserId): NotificationResult
-  FUNCTION notifyStatusChanged(ticketId: TicketId, newStatus: TicketStatus): NotificationResult
-  FUNCTION notifyCommentAdded(ticketId: TicketId, commentId: CommentId): NotificationResult
-  FUNCTION notifyTicketResolved(ticketId: TicketId): NotificationResult
-  FUNCTION getUserNotifications(userId: UserId): NotificationListResult
-  FUNCTION markAsRead(notificationId: NotificationId): NotificationResult
-END INTERFACE
+```typescript
+// src/cache/token-blacklist.ts
+export async function blacklistToken(jti: string, ttlSeconds: number): Promise<void>
+export async function isBlacklisted(jti: string): Promise<boolean>
 ```
 
-**Responsibilities**:
-- Wysyłanie powiadomień email
-- Powiadomienia w czasie rzeczywistym (WebSocket)
-- Powiadomienia w dashboardzie
-- Szablonowanie treści powiadomień
+Key format: `blacklist:{jti}`
 
-### Component 4: User Service
+### Updated Auth Middleware
 
-**Purpose**: Zarządza użytkownikami, rolami i uprawnieniami.
+`src/middleware/auth.ts` is updated to:
+1. Extract the `jti` claim from the validated JWT payload
+2. Check `isBlacklisted(jti)` before allowing the request
+3. Fall back gracefully (allow request, log warning) if Redis is unavailable
 
-**Interface**:
-```pascal
-INTERFACE UserService
-  FUNCTION getUser(id: UserId): UserResult
-  FUNCTION getUserByRole(role: UserRole): UserListResult
-  FUNCTION authenticateUser(credentials: Credentials): AuthResult
-  FUNCTION hasPermission(userId: UserId, permission: Permission): Boolean
-  FUNCTION updateUserPreferences(userId: UserId, prefs: Preferences): UserResult
-END INTERFACE
+### Logout Route
+
+A new `POST /auth/logout` endpoint is added to `src/routes/auth.ts`:
+- Validates the Bearer token
+- Computes `ttl = exp - Math.floor(Date.now() / 1000)`
+- If `ttl > 0`, calls `blacklistToken(jti, ttl)`
+- Returns HTTP 200 in all cases (including Redis unavailability)
+
+### Health Endpoint
+
+`GET /health` in `src/index.ts` is extended to run parallel connectivity checks:
+
+```typescript
+interface HealthResponse {
+  status: 'ok' | 'degraded';
+  db: 'ok' | 'error';
+  cache: 'ok' | 'error';
+  uptimeSeconds: number;
+  timestamp: string;
+}
 ```
 
-**Responsibilities**:
-- Uwierzytelnianie i autoryzacja użytkowników
-- Zarządzanie rolami (Zgłaszający, Technik, Administrator)
-- Przechowywanie preferencji powiadomień
-- Walidacja uprawnień do operacji
+Each check has a 2-second timeout. HTTP 503 is returned if either check fails.
+
+### Connection Pool
+
+`src/database/connection.ts` is updated to:
+- Read `PG_POOL_MAX` from env, validate it is an integer in range 1–100, default to 10
+- Register a `SIGTERM` handler that calls `pool.end()` with a 30-second drain timeout
+- Support `PGSSL` / `DATABASE_SSL` env vars for SSL configuration
+
+---
 
 ## Data Models
 
-### Model 1: Ticket
+### New Table: `user_passwords`
 
-```pascal
-STRUCTURE Ticket
-  id: UUID
-  title: String
-  description: String
-  category: TicketCategory
-  priority: Priority
-  status: TicketStatus
-  reporterId: UserId
-  assigneeId: UserId OPTIONAL
-  createdAt: DateTime
-  updatedAt: DateTime
-  resolvedAt: DateTime OPTIONAL
-  dueDate: DateTime OPTIONAL
-  comments: List<Comment>
-  attachments: List<Attachment>
-  history: List<TicketHistoryEntry>
-END STRUCTURE
-
-ENUM TicketCategory
-  HARDWARE
-  SOFTWARE
-  NETWORK
-  ACCESS
-  OTHER
-END ENUM
-
-ENUM Priority
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-END ENUM
-
-ENUM TicketStatus
-  NEW
-  IN_PROGRESS
-  WAITING_FOR_INFO
-  RESOLVED
-  CLOSED
-  REOPENED
-END ENUM
+```sql
+CREATE TABLE IF NOT EXISTS user_passwords (
+  user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  password_hash VARCHAR(255) NOT NULL,
+  updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
 ```
 
-**Validation Rules**:
-- `title` nie może być pusty, max 200 znaków
-- `description` nie może być pusta, max 5000 znaków
-- `priority` musi być jedną z wartości enum
-- `reporterId` musi istnieć w systemie
-- `dueDate` musi być późniejsza niż `createdAt` (jeśli ustawiona)
+This table is created in Migration File 0001 alongside the existing tables from `schema.sql`.
 
-### Model 2: User
+### Migration File Naming
 
-```pascal
-STRUCTURE User
-  id: UUID
-  email: String
-  name: String
-  role: UserRole
-  department: String
-  isActive: Boolean
-  preferences: UserPreferences
-  createdAt: DateTime
-END STRUCTURE
+Migration files follow the `node-pg-migrate` convention:
 
-ENUM UserRole
-  REPORTER      // Zgłaszający - może tworzyć i przeglądać własne zgłoszenia
-  TECHNICIAN    // Technik - może obsługiwać przypisane zgłoszenia
-  ADMIN         // Administrator - pełny dostęp do dashboardu i kolejki
-END ENUM
-
-STRUCTURE UserPreferences
-  emailNotifications: Boolean
-  dashboardNotifications: Boolean
-  language: String
-END STRUCTURE
+```
+src/database/migrations/
+  0001_initial-schema.js
 ```
 
-**Validation Rules**:
-- `email` musi być poprawnym adresem email, unikalny w systemie
-- `name` nie może być puste
-- `role` musi być jedną z wartości enum
+The file exports an `up` function containing all DDL from `schema.sql` plus the `user_passwords` table. All `CREATE TABLE` and `CREATE INDEX` statements use `IF NOT EXISTS` for safe re-runs.
 
-### Model 3: Comment
+### JWT Token Shape
 
-```pascal
-STRUCTURE Comment
-  id: UUID
-  ticketId: TicketId
-  authorId: UserId
-  content: String
-  isInternal: Boolean    // TRUE = widoczny tylko dla IT
-  createdAt: DateTime
-  attachments: List<Attachment>
-END STRUCTURE
+The `generateToken` function is updated to include a `jti` (UUID v4) claim:
+
+```typescript
+interface JwtPayload {
+  userId: string;
+  email: string;
+  role: UserRole;
+  jti: string;   // UUID v4 — added by this feature
+  iat: number;
+  exp: number;
+}
 ```
 
-**Validation Rules**:
-- `content` nie może być puste, max 2000 znaków
-- `authorId` musi istnieć w systemie
-- Tylko technicy i admini mogą tworzyć komentarze wewnętrzne
+### Environment Variables
 
-### Model 4: Notification
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | — | Full PostgreSQL connection string (takes precedence) |
+| `PGHOST` | `localhost` | PostgreSQL host |
+| `PGPORT` | `5432` | PostgreSQL port |
+| `PGDATABASE` | `app_db` | Database name |
+| `PGUSER` | — | PostgreSQL user |
+| `PGPASSWORD` | — | PostgreSQL password |
+| `PGSSL` | `false` | Enable SSL for PostgreSQL |
+| `DATABASE_SSL` | `false` | Alternative SSL flag |
+| `PG_POOL_MAX` | `10` | Maximum pool connections (1–100) |
+| `REDIS_URL` | — | Full Redis connection string (takes precedence) |
+| `REDIS_HOST` | `localhost` | Redis host |
+| `REDIS_PORT` | `6379` | Redis port |
 
-```pascal
-STRUCTURE Notification
-  id: UUID
-  userId: UserId
-  type: NotificationType
-  title: String
-  message: String
-  ticketId: TicketId OPTIONAL
-  isRead: Boolean
-  createdAt: DateTime
-  readAt: DateTime OPTIONAL
-END STRUCTURE
-
-ENUM NotificationType
-  TICKET_CREATED
-  TICKET_ASSIGNED
-  STATUS_CHANGED
-  COMMENT_ADDED
-  TICKET_RESOLVED
-  TICKET_ESCALATED
-END ENUM
-```
-
-## Algorithmic Pseudocode
-
-### Main Algorithm: Create Ticket
-
-```pascal
-ALGORITHM createTicket
-INPUT: data of type TicketCreateInput
-OUTPUT: result of type TicketResult
-
-BEGIN
-  // Precondition: data jest zdefiniowane
-  ASSERT data IS NOT NULL
-  
-  // Step 1: Validate input data
-  validationResult ← validateTicketInput(data)
-  IF validationResult.isValid = FALSE THEN
-    RETURN TicketResult.Error(validationResult.errors)
-  END IF
-  
-  // Step 2: Verify reporter exists
-  reporter ← userService.getUser(data.reporterId)
-  IF reporter IS NULL THEN
-    RETURN TicketResult.Error("Reporter not found")
-  END IF
-  
-  // Step 3: Create ticket entity
-  ticket ← new Ticket()
-  ticket.id ← generateUUID()
-  ticket.title ← data.title
-  ticket.description ← data.description
-  ticket.category ← data.category
-  ticket.priority ← data.priority OR calculatePriority(data)
-  ticket.status ← TicketStatus.NEW
-  ticket.reporterId ← data.reporterId
-  ticket.createdAt ← now()
-  ticket.updatedAt ← now()
-  
-  // Step 4: Calculate due date based on priority
-  ticket.dueDate ← calculateDueDate(ticket.priority)
-  
-  // Step 5: Save to database
-  savedTicket ← database.insert(ticket)
-  
-  // Step 6: Send notifications
-  notificationService.notifyTicketCreated(savedTicket.id)
-  
-  // Postcondition: Ticket został utworzony z poprawnymi danymi
-  ASSERT savedTicket.id IS NOT NULL
-  ASSERT savedTicket.status = TicketStatus.NEW
-  
-  RETURN TicketResult.Success(savedTicket)
-END
-```
-
-**Preconditions**:
-- `data` jest zdefiniowane i nie jest null
-- `data.reporterId` odnosi się do istniejącego użytkownika
-- `data.title` i `data.description` są niepuste
-
-**Postconditions**:
-- Zwrócony ticket ma poprawny id
-- Status ticketu to NEW
-- Data utworzenia jest ustawiona
-- Powiadomienie zostało wysłane do administratorów
-
-### Algorithm: Assign Ticket
-
-```pascal
-ALGORITHM assignTicket
-INPUT: ticketId of type TicketId, assigneeId of type UserId
-OUTPUT: result of type TicketResult
-
-BEGIN
-  // Precondition: Parametry są zdefiniowane
-  ASSERT ticketId IS NOT NULL
-  ASSERT assigneeId IS NOT NULL
-  
-  // Step 1: Retrieve ticket
-  ticket ← database.getTicket(ticketId)
-  IF ticket IS NULL THEN
-    RETURN TicketResult.Error("Ticket not found")
-  END IF
-  
-  // Step 2: Verify assignee exists and has appropriate role
-  assignee ← userService.getUser(assigneeId)
-  IF assignee IS NULL THEN
-    RETURN TicketResult.Error("Assignee not found")
-  END IF
-  
-  IF assignee.role NOT IN [UserRole.TECHNICIAN, UserRole.ADMIN] THEN
-    RETURN TicketResult.Error("Assignee must be technician or admin")
-  END IF
-  
-  // Step 3: Check if ticket can be assigned
-  IF ticket.status = TicketStatus.CLOSED THEN
-    RETURN TicketResult.Error("Cannot assign closed ticket")
-  END IF
-  
-  // Step 4: Update ticket
-  previousAssignee ← ticket.assigneeId
-  ticket.assigneeId ← assigneeId
-  ticket.status ← TicketStatus.IN_PROGRESS
-  ticket.updatedAt ← now()
-  
-  // Step 5: Add history entry
-  historyEntry ← new TicketHistoryEntry()
-  historyEntry.action ← "ASSIGNED"
-  historyEntry.previousValue ← previousAssignee
-  historyEntry.newValue ← assigneeId
-  historyEntry.timestamp ← now()
-  ticket.history.add(historyEntry)
-  
-  // Step 6: Save changes
-  database.update(ticket)
-  
-  // Step 7: Send notifications
-  notificationService.notifyTicketAssigned(ticketId, assigneeId)
-  IF previousAssignee IS NOT NULL THEN
-    notificationService.notifyReassignment(ticketId, previousAssignee)
-  END IF
-  
-  // Postcondition: Ticket przypisany do technika
-  ASSERT ticket.assigneeId = assigneeId
-  ASSERT ticket.status = TicketStatus.IN_PROGRESS
-  
-  RETURN TicketResult.Success(ticket)
-END
-```
-
-**Preconditions**:
-- `ticketId` odnosi się do istniejącego ticketu
-- `assigneeId` odnosi się do użytkownika z rolą TECHNICIAN lub ADMIN
-- Ticket nie jest zamknięty
-
-**Postconditions**:
-- Ticket jest przypisany do wskazanego technika
-- Status zmienił się na IN_PROGRESS
-- Historia zawiera wpis o przypisaniu
-- Powiadomienia zostały wysłane
-
-### Algorithm: Get Pending Tickets (Queue)
-
-```pascal
-ALGORITHM getPendingTickets
-INPUT: filters of type QueueFilters
-OUTPUT: result of type TicketListResult
-
-BEGIN
-  // Step 1: Build query based on filters
-  query ← "SELECT * FROM tickets WHERE status NOT IN (RESOLVED, CLOSED)"
-  
-  IF filters.priority IS NOT NULL THEN
-    query.append(" AND priority = ?", filters.priority)
-  END IF
-  
-  IF filters.category IS NOT NULL THEN
-    query.append(" AND category = ?", filters.category)
-  END IF
-  
-  IF filters.assigneeId IS NOT NULL THEN
-    query.append(" AND assigneeId = ?", filters.assigneeId)
-  END IF
-  
-  // Step 2: Apply sorting
-  sortBy ← filters.sortBy OR "priority"
-  sortOrder ← filters.sortOrder OR "DESC"
-  
-  IF sortBy = "priority" THEN
-    // CRITICAL > HIGH > MEDIUM > LOW
-    query.append(" ORDER BY FIELD(priority, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW')")
-  ELSE IF sortBy = "createdAt" THEN
-    query.append(" ORDER BY createdAt " + sortOrder)
-  ELSE IF sortBy = "dueDate" THEN
-    query.append(" ORDER BY dueDate ASC")
-  END IF
-  
-  // Step 3: Apply pagination
-  page ← filters.page OR 1
-  pageSize ← filters.pageSize OR 20
-  offset ← (page - 1) * pageSize
-  query.append(" LIMIT ? OFFSET ?", pageSize, offset)
-  
-  // Step 4: Execute query
-  tickets ← database.query(query)
-  
-  // Step 5: Calculate total count for pagination
-  countQuery ← "SELECT COUNT(*) FROM tickets WHERE status NOT IN (RESOLVED, CLOSED)"
-  totalCount ← database.queryScalar(countQuery)
-  
-  // Postcondition: Zwrócona lista jest zgodna z filtrami
-  FOR each ticket IN tickets DO
-    ASSERT ticket.status NOT IN (RESOLVED, CLOSED)
-  END FOR
-  
-  RETURN TicketListResult.Success(tickets, totalCount, page, pageSize)
-END
-```
-
-**Preconditions**:
-- `filters` jest zdefiniowane (może być puste)
-
-**Postconditions**:
-- Zwrócone tickety nie są w statusie RESOLVED lub CLOSED
-- Wyniki są posortowane zgodnie z parametrami
-- Paginacja jest poprawnie zastosowana
-
-**Loop Invariants**:
-- Wszystkie zwrócone tickety spełniają kryteria filtrów
-- Kolejność ticketów jest zgodna z parametrem sortowania
-
-### Algorithm: Change Ticket Status
-
-```pascal
-ALGORITHM changeStatus
-INPUT: ticketId of type TicketId, newStatus of type TicketStatus, userId of type UserId
-OUTPUT: result of type TicketResult
-
-BEGIN
-  // Step 1: Retrieve ticket
-  ticket ← database.getTicket(ticketId)
-  IF ticket IS NULL THEN
-    RETURN TicketResult.Error("Ticket not found")
-  END IF
-  
-  // Step 2: Validate status transition
-  previousStatus ← ticket.status
-  isValidTransition ← validateStatusTransition(previousStatus, newStatus)
-  
-  IF isValidTransition = FALSE THEN
-    RETURN TicketResult.Error("Invalid status transition from " + previousStatus + " to " + newStatus)
-  END IF
-  
-  // Step 3: Check permissions
-  user ← userService.getUser(userId)
-  canChangeStatus ← checkStatusChangePermission(user, ticket, newStatus)
-  
-  IF canChangeStatus = FALSE THEN
-    RETURN TicketResult.Error("Permission denied")
-  END IF
-  
-  // Step 4: Update ticket
-  ticket.status ← newStatus
-  ticket.updatedAt ← now()
-  
-  IF newStatus = TicketStatus.RESOLVED THEN
-    ticket.resolvedAt ← now()
-  END IF
-  
-  // Step 5: Add history entry
-  historyEntry ← new TicketHistoryEntry()
-  historyEntry.action ← "STATUS_CHANGED"
-  historyEntry.previousValue ← previousStatus
-  historyEntry.newValue ← newStatus
-  historyEntry.changedBy ← userId
-  historyEntry.timestamp ← now()
-  ticket.history.add(historyEntry)
-  
-  // Step 6: Save changes
-  database.update(ticket)
-  
-  // Step 7: Send notifications based on status
-  IF newStatus = TicketStatus.RESOLVED THEN
-    notificationService.notifyTicketResolved(ticketId)
-  ELSE
-    notificationService.notifyStatusChanged(ticketId, newStatus)
-  END IF
-  
-  // Postcondition: Status został zmieniony
-  ASSERT ticket.status = newStatus
-  
-  RETURN TicketResult.Success(ticket)
-END
-```
-
-**Valid Status Transitions**:
-```pascal
-FUNCTION validateStatusTransition(from: TicketStatus, to: TicketStatus): Boolean
-BEGIN
-  CASE from OF
-    TicketStatus.NEW:
-      RETURN to IN [TicketStatus.IN_PROGRESS, TicketStatus.CLOSED]
-    TicketStatus.IN_PROGRESS:
-      RETURN to IN [TicketStatus.WAITING_FOR_INFO, TicketStatus.RESOLVED, TicketStatus.CLOSED]
-    TicketStatus.WAITING_FOR_INFO:
-      RETURN to IN [TicketStatus.IN_PROGRESS, TicketStatus.CLOSED]
-    TicketStatus.RESOLVED:
-      RETURN to IN [TicketStatus.CLOSED, TicketStatus.REOPENED]
-    TicketStatus.CLOSED:
-      RETURN to = TicketStatus.REOPENED
-    TicketStatus.REOPENED:
-      RETURN to IN [TicketStatus.IN_PROGRESS, TicketStatus.CLOSED]
-    DEFAULT:
-      RETURN FALSE
-  END CASE
-END
-```
-
-### Algorithm: Escalate Ticket
-
-```pascal
-ALGORITHM escalateTicket
-INPUT: ticketId of type TicketId
-OUTPUT: result of type TicketResult
-
-BEGIN
-  // Step 1: Retrieve ticket
-  ticket ← database.getTicket(ticketId)
-  IF ticket IS NULL THEN
-    RETURN TicketResult.Error("Ticket not found")
-  END IF
-  
-  // Step 2: Check escalation conditions
-  shouldEscalate ← FALSE
-  escalationReason ← ""
-  
-  // Check SLA breach
-  IF ticket.dueDate IS NOT NULL AND now() > ticket.dueDate THEN
-    shouldEscalate ← TRUE
-    escalationReason ← "SLA breach: ticket overdue"
-  END IF
-  
-  // Check no activity for 48 hours
-  lastActivity ← getLastActivityTime(ticket)
-  IF now() - lastActivity > 48 HOURS THEN
-    shouldEscalate ← TRUE
-    escalationReason ← "No activity for 48 hours"
-  END IF
-  
-  // Check high priority ticket without assignee
-  IF ticket.priority IN [Priority.HIGH, Priority.CRITICAL] AND ticket.assigneeId IS NULL THEN
-    shouldEscalate ← TRUE
-    escalationReason ← "High priority ticket unassigned"
-  END IF
-  
-  IF shouldEscalate = FALSE THEN
-    RETURN TicketResult.Error("Ticket does not meet escalation criteria")
-  END IF
-  
-  // Step 3: Escalate - increase priority
-  previousPriority ← ticket.priority
-  ticket.priority ← getNextPriority(ticket.priority)
-  ticket.updatedAt ← now()
-  
-  // Step 4: Add history entry
-  historyEntry ← new TicketHistoryEntry()
-  historyEntry.action ← "ESCALATED"
-  historyEntry.previousValue ← previousPriority
-  historyEntry.newValue ← ticket.priority
-  historyEntry.reason ← escalationReason
-  historyEntry.timestamp ← now()
-  ticket.history.add(historyEntry)
-  
-  // Step 5: Save changes
-  database.update(ticket)
-  
-  // Step 6: Notify admins
-  admins ← userService.getUserByRole(UserRole.ADMIN)
-  FOR each admin IN admins DO
-    notificationService.notifyEscalation(ticketId, admin.id, escalationReason)
-  END FOR
-  
-  // Postcondition: Priorytet został podniesiony
-  ASSERT ticket.priority > previousPriority
-  
-  RETURN TicketResult.Success(ticket)
-END
-```
-
-## Key Functions with Formal Specifications
-
-### Function 1: validateTicketInput()
-
-```pascal
-FUNCTION validateTicketInput(data: TicketCreateInput): ValidationResult
-```
-
-**Preconditions:**
-- `data` jest zdefiniowane (nie null/undefined)
-
-**Postconditions:**
-- Zwraca ValidationResult z polem `isValid` (boolean)
-- Jeśli `isValid = false`, zawiera listę błędów walidacji
-- Nie modyfikuje danych wejściowych
-
-### Function 2: calculateDueDate()
-
-```pascal
-FUNCTION calculateDueDate(priority: Priority): DateTime
-```
-
-**Preconditions:**
-- `priority` jest jedną z wartości enum Priority
-
-**Postconditions:**
-- Zwraca datę zgodną z SLA dla danego priorytetu
-- CRITICAL: 4 godziny
-- HIGH: 8 godzin
-- MEDIUM: 24 godziny
-- LOW: 72 godziny
-
-### Function 3: checkStatusChangePermission()
-
-```pascal
-FUNCTION checkStatusChangePermission(user: User, ticket: Ticket, newStatus: TicketStatus): Boolean
-```
-
-**Preconditions:**
-- `user`, `ticket`, `newStatus` są zdefiniowane
-
-**Postconditions:**
-- Zwraca `true` jeśli użytkownik ma prawo zmienić status
-- Admin może zmienić każdy status
-- Technik może zmienić status tylko przypisanych ticketów
-- Zgłaszający może tylko zamknąć własny ticket
-
-## Example Usage
-
-### Example 1: User creates a new ticket
-
-```pascal
-SEQUENCE
-  // User fills out the form
-  ticketData ← new TicketCreateInput()
-  ticketData.title ← "Monitor nie działa"
-  ticketData.description ← "Ekran stanął w miejscu, nie reaguje na przyciski"
-  ticketData.category ← TicketCategory.HARDWARE
-  ticketData.priority ← Priority.MEDIUM
-  ticketData.reporterId ← currentUser.id
-  
-  // Submit ticket
-  result ← ticketService.createTicket(ticketData)
-  
-  IF result.isSuccess THEN
-    DISPLAY "Zgłoszenie utworzone: " + result.ticket.id
-    DISPLAY "Przewidywany czas realizacji: " + result.ticket.dueDate
-  ELSE
-    DISPLAY "Błąd: " + result.error
-  END IF
-END SEQUENCE
-```
-
-### Example 2: Admin assigns ticket to technician
-
-```pascal
-SEQUENCE
-  // Admin views queue
-  filters ← new QueueFilters()
-  filters.status ← TicketStatus.NEW
-  pendingTickets ← queueService.getPendingTickets(filters)
-  
-  DISPLAY "Zgłoszenia oczekujące:"
-  FOR each ticket IN pendingTickets DO
-    DISPLAY ticket.id + ": " + ticket.title + " (" + ticket.priority + ")"
-  END FOR
-  
-  // Admin selects ticket and assigns
-  selectedTicketId ← "123e4567-e89b-12d3-a456-426614174000"
-  technicianId ← "987e6543-e21b-12d3-a456-426614174000"
-  
-  result ← ticketService.assignTicket(selectedTicketId, technicianId)
-  
-  IF result.isSuccess THEN
-    DISPLAY "Zgłoszenie przypisane do technika"
-  ELSE
-    DISPLAY "Błąd: " + result.error
-  END IF
-END SEQUENCE
-```
-
-### Example 3: Technician resolves ticket
-
-```pascal
-SEQUENCE
-  ticketId ← "123e4567-e89b-12d3-a456-426614174000"
-  
-  // Add resolution comment
-  comment ← new CommentInput()
-  comment.content ← "Wymieniono kabel zasilający. Monitor działa poprawnie."
-  comment.isInternal ← FALSE
-  ticketService.addComment(ticketId, comment)
-  
-  // Change status to resolved
-  result ← ticketService.changeStatus(ticketId, TicketStatus.RESOLVED, currentUserId)
-  
-  IF result.isSuccess THEN
-    DISPLAY "Zgłoszenie rozwiązane"
-    // User will be notified automatically
-  END IF
-END SEQUENCE
-```
-
-### Example 4: User reopens ticket
-
-```pascal
-SEQUENCE
-  ticketId ← "123e4567-e89b-12d3-a456-426614174000"
-  
-  // Add comment explaining why reopening
-  comment ← new CommentInput()
-  comment.content ← "Problem powrócił - monitor ponownie nie działa"
-  comment.isInternal ← FALSE
-  ticketService.addComment(ticketId, comment)
-  
-  // Reopen ticket
-  result ← ticketService.changeStatus(ticketId, TicketStatus.REOPENED, currentUserId)
-  
-  IF result.isSuccess THEN
-    DISPLAY "Zgłoszenie ponownie otwarte"
-  END IF
-END SEQUENCE
-```
+---
 
 ## Correctness Properties
 
-*A property is a characteristic or behavior that should hold true across all valid executions of a system-essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
+*A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-### Property 1: Valid Status Transitions
+The project already includes `fast-check` (v4.8.0) as a dev dependency and uses `vitest` as the test runner. All property-based tests use `fast-check` with a minimum of 100 iterations.
 
-*For any* ticket and any sequence of status changes applied to it, each transition must be permitted by the defined state machine (NEW→IN_PROGRESS, NEW→CLOSED, IN_PROGRESS→WAITING_FOR_INFO, IN_PROGRESS→RESOLVED, IN_PROGRESS→CLOSED, WAITING_FOR_INFO→IN_PROGRESS, WAITING_FOR_INFO→CLOSED, RESOLVED→CLOSED, RESOLVED→REOPENED, CLOSED→REOPENED, REOPENED→IN_PROGRESS, REOPENED→CLOSED), and any transition not in this set must be rejected.
+---
 
-**Validates: Requirements 2.1, 2.2**
+### Property 1: Migration ordering
 
-### Property 2: Input Validation Correctness
+*For any* set of migration files with distinct timestamps, the Migration Runner SHALL apply them in strictly ascending timestamp order, such that no migration with a later timestamp is applied before one with an earlier timestamp.
 
-*For any* string input, the ticket validation function shall accept titles of 1-200 characters and reject empty or longer titles; accept descriptions of 1-5000 characters and reject empty or longer descriptions; accept only valid category values (HARDWARE, SOFTWARE, NETWORK, ACCESS, OTHER); accept only valid priority values (LOW, MEDIUM, HIGH, CRITICAL); and accept comment content of 1-2000 characters and reject empty or longer content.
+**Validates: Requirements 1.2**
 
-**Validates: Requirements 1.2, 1.3, 1.4, 11.1, 11.2, 11.3, 11.4, 11.6**
+---
 
-### Property 3: SLA Due Date Calculation
+### Property 2: Migration idempotence
 
-*For any* ticket with a given priority, the calculated due date shall equal the creation time plus the SLA duration for that priority (CRITICAL=4h, HIGH=8h, MEDIUM=24h, LOW=72h), and the due date shall always be strictly later than the creation date.
+*For any* database state where a set of migrations has already been applied, running the Migration Runner again SHALL result in the same schema state — no migration that is already recorded in the `pgmigrations` table SHALL be re-executed.
 
-**Validates: Requirements 1.5, 9.1, 9.2, 9.3, 9.4, 9.5**
+**Validates: Requirements 1.7**
 
-### Property 4: Assignment Role Enforcement
+---
 
-*For any* ticket assignment operation, if the target user has role TECHNICIAN or ADMIN and the ticket is not CLOSED, the assignment shall succeed and the ticket status shall change to IN_PROGRESS; if the target user has role REPORTER, the assignment shall be rejected; if the ticket is CLOSED, the assignment shall be rejected regardless of user role.
+### Property 3: Connection configuration precedence
 
-**Validates: Requirements 3.1, 3.2, 3.3**
+*For any* combination of `DATABASE_URL`, `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD`, `REDIS_URL`, and `REDIS_HOST`/`REDIS_PORT` environment variable values, the Connection Pool and Redis client SHALL use `DATABASE_URL` / `REDIS_URL` when set, and fall back to individual variables otherwise. When both are set, the full URL SHALL always take precedence.
 
-### Property 5: History Audit Trail Integrity
+**Validates: Requirements 1.9, 13.1, 13.4**
 
-*For any* ticket, after any modification, a history entry shall be created containing a non-null action type, non-null user reference, non-null timestamp not in the future, and the previous and new values. All history entries for a ticket shall be in chronological order.
+---
 
-**Validates: Requirements 2.4, 3.4, 5.4, 10.1, 10.2, 10.3, 10.4**
+### Property 4: Pool max size validation
 
-### Property 6: Queue Filtering Invariant
+*For any* value of `PG_POOL_MAX`, the Connection Pool SHALL use that value as the maximum pool size if and only if it is a valid integer in the range 1–100 inclusive; for any value outside that range or any non-integer string, the pool SHALL use the default of 10.
 
-*For any* set of tickets and any filter criteria applied to the queue, all returned tickets shall match the filter criteria, and no ticket with status RESOLVED or CLOSED shall appear in the pending queue results.
+**Validates: Requirements 13.2**
 
-**Validates: Requirements 4.1, 4.2**
+---
 
-### Property 7: Queue Sorting Correctness
+### Property 5: Ticket create/findById round-trip
 
-*For any* set of tickets in the queue, sorting by priority shall produce the order CRITICAL > HIGH > MEDIUM > LOW, and sorting by date fields shall produce results in the specified ascending or descending order.
+*For any* valid ticket creation input (non-empty title, non-empty description, valid category, valid priority, existing reporterId), calling `TicketRepository.create` followed by `TicketRepository.findById` with the returned ID SHALL return a `Ticket` object with all fields equal to the input values, `comments` set to `[]`, and `history` set to `[]`.
 
-**Validates: Requirements 4.3, 4.4**
+**Validates: Requirements 3.1, 3.2**
 
-### Property 8: Pagination Consistency
+---
 
-*For any* page number, page size, and total ticket count, the returned page shall contain at most pageSize items, the offset shall equal (page-1)*pageSize, and the total count shall reflect the full unfiltered result set size.
+### Property 6: Ticket update preserves unmodified fields
+
+*For any* existing ticket and any non-empty subset of updatable fields (`title`, `description`, `status`, `priority`, `category`, `assigneeId`, `resolvedAt`, `dueDate`), calling `TicketRepository.update` SHALL change exactly the specified fields, leave all other fields unchanged, and set `updated_at` to the current timestamp.
+
+**Validates: Requirements 3.3**
+
+---
+
+### Property 7: Ticket filter correctness
+
+*For any* `TicketFilters` object containing one or more filter criteria, every ticket returned by `TicketRepository.findByFilters` SHALL satisfy all specified criteria simultaneously, and the results SHALL be ordered by `created_at` ascending.
+
+**Validates: Requirements 3.4**
+
+---
+
+### Property 8: Invalid UUID rejected without database query
+
+*For any* string that is not a well-formed UUID (i.e., does not match the UUID v4 format), calling `TicketRepository.findById` SHALL throw an error indicating an invalid ID format without executing any database query.
+
+**Validates: Requirements 3.7**
+
+---
+
+### Property 9: User create/findById round-trip
+
+*For any* valid user creation input (unique email, non-empty name, valid role, non-empty department), calling `UserRepository.create` followed by `UserRepository.findById` with the returned ID SHALL return a `User` object with all fields equal to the input values.
+
+**Validates: Requirements 4.1, 4.4**
+
+---
+
+### Property 10: Case-insensitive email lookup
+
+*For any* user stored with a given email address, calling `UserRepository.findByEmail` with any casing variant of that email (uppercase, lowercase, mixed) SHALL return the same `User` object.
+
+**Validates: Requirements 4.3**
+
+---
+
+### Property 11: findByRole returns only active users with matching role
+
+*For any* `UserRole` value, every user returned by `UserRepository.findByRole` SHALL have `is_active = true` and `role` equal to the specified value. No inactive user and no user with a different role SHALL appear in the result.
 
 **Validates: Requirements 4.5**
 
-### Property 9: Escalation Trigger Conditions
+---
 
-*For any* ticket that has passed its due date, or has had no activity for 48 hours, or has HIGH/CRITICAL priority with no assignee, the escalation function shall increase the ticket's priority and record the escalation reason.
+### Property 12: User update preserves unmodified fields
 
-**Validates: Requirements 5.1, 5.2, 5.3, 5.4**
+*For any* existing user and any non-empty subset of updatable fields, calling `UserRepository.update` SHALL change exactly the specified fields and leave all other fields unchanged.
 
-### Property 10: Permission Enforcement
+**Validates: Requirements 4.6**
 
-*For any* user-ticket-operation combination, a Reporter shall only be able to view and close their own tickets; a Technician shall only be able to change status on tickets assigned to them; an Administrator shall be able to perform all operations on all tickets. Any unauthorized operation shall be rejected.
+---
 
-**Validates: Requirements 8.1, 8.2, 8.3, 8.4**
+### Property 13: Password set/verify round-trip
 
-### Property 11: Internal Comment Visibility
+*For any* valid plaintext password (length ≥ 8) and any existing user ID, calling `PasswordRepository.setPassword` followed by `PasswordRepository.verifyPassword` with the same password SHALL return `true`. Calling `PasswordRepository.verifyPassword` with any different string SHALL return `false`.
 
-*For any* comment marked as internal, it shall be visible only to users with TECHNICIAN or ADMIN role, and a Reporter shall never be able to create an internal comment.
+**Validates: Requirements 5.1, 5.2**
 
-**Validates: Requirements 6.3, 6.4**
+---
 
-### Property 12: Notification Ordering
+### Property 14: Short password rejected before hashing
 
-*For any* user, their notification list shall be returned ordered by creation date, and marking a notification as read shall set a read timestamp without affecting other notifications.
+*For any* string of length 0–7 (inclusive), calling `PasswordRepository.setPassword` SHALL throw a validation error without executing any database query or bcrypt hashing operation.
 
-**Validates: Requirements 7.2, 7.3**
+**Validates: Requirements 5.5**
+
+---
+
+### Property 15: Comment create/findByTicketId round-trip with ordering
+
+*For any* valid comment creation input and any existing ticket, calling `CommentRepository.create` followed by `CommentRepository.findByTicketId` SHALL include the created comment in the result, and all returned comments SHALL be ordered by `created_at` ascending.
+
+**Validates: Requirements 6.1, 6.2**
+
+---
+
+### Property 16: Internal comment filtering
+
+*For any* set of comments on a ticket (containing a mix of internal and non-internal comments), calling `CommentRepository.findByTicketId` with `includeInternal = false` SHALL return a list containing no comments where `is_internal = true`.
+
+**Validates: Requirements 6.3**
+
+---
+
+### Property 17: Notification create/findByUserId round-trip with pagination ordering
+
+*For any* valid notification creation input and any valid pagination parameters (`page ≥ 1`, `1 ≤ pageSize ≤ 100`), calling `NotificationRepository.create` followed by `NotificationRepository.findByUserId` SHALL include the created notification in the result, all returned notifications SHALL be ordered by `created_at` descending, and the pagination metadata (`total`, `page`, `pageSize`, `totalPages`) SHALL be consistent with the actual data.
+
+**Validates: Requirements 7.1, 7.3**
+
+---
+
+### Property 18: markAsRead sets read state
+
+*For any* notification belonging to a user, calling `NotificationRepository.markAsRead` with the correct `notificationId` and `userId` SHALL return the updated notification with `is_read = true` and `read_at` set to a non-null timestamp.
+
+**Validates: Requirements 7.5**
+
+---
+
+### Property 19: History append/findByTicketId round-trip with ordering
+
+*For any* valid history entry creation input and any existing ticket, calling `TicketHistoryRepository.append` followed by `TicketHistoryRepository.findByTicketId` SHALL include the appended entry in the result, and all returned entries SHALL be ordered by `timestamp` ascending.
+
+**Validates: Requirements 8.1, 8.4**
+
+---
+
+### Property 20: getTicket populates comments and history
+
+*For any* ticket that has associated comments and history entries in the database, calling `TicketService.getTicket` SHALL return a `Ticket` object with `comments` and `history` arrays fully populated from `CommentRepository` and `TicketHistoryRepository` respectively.
+
+**Validates: Requirements 9.5**
+
+---
+
+### Property 21: Queue cache-first lookup
+
+*For any* `QueueFilters` object, when a cached result exists for the corresponding cache key, `QueueService.getPendingTickets` SHALL return the cached result without executing a PostgreSQL query. When no cached result exists, it SHALL query PostgreSQL, store the result in the cache with a TTL of 30 seconds, and return the result.
+
+**Validates: Requirements 10.1, 10.2, 10.3**
+
+---
+
+### Property 22: Cache invalidation on ticket mutation
+
+*For any* ticket mutation that changes `status`, `assigneeId`, `priority`, or `category` (or creates a new ticket), all existing queue cache entries SHALL be invalidated so that subsequent calls to `QueueService.getPendingTickets` reflect the updated data.
+
+**Validates: Requirements 10.4**
+
+---
+
+### Property 23: Deterministic cache key
+
+*For any* two `QueueFilters` objects that are deeply equal (same values for all fields including pagination), the derived cache key SHALL be identical. *For any* two `QueueFilters` objects that differ in at least one field, the derived cache keys SHALL be different.
+
+**Validates: Requirements 10.6**
+
+---
+
+### Property 24: Logout stores JTI with correct TTL and key format
+
+*For any* valid, non-expired JWT token, calling `POST /auth/logout` SHALL store a Redis entry with key `blacklist:{jti}` and a TTL equal to `exp − floor(Date.now() / 1000)` seconds (rounded down to the nearest whole second), and SHALL return HTTP 200.
+
+**Validates: Requirements 11.1, 11.6**
+
+---
+
+### Property 25: Blacklisted token rejected
+
+*For any* JWT token whose JTI has been stored in the Token Blacklist, the `authenticate` middleware SHALL reject the request with HTTP 401, regardless of whether the token's signature and expiry are otherwise valid.
+
+**Validates: Requirements 11.2**
+
+---
+
+### Property 26: JWT includes jti claim
+
+*For any* call to `generateToken`, the resulting JWT SHALL contain a `jti` claim that is a valid UUID v4 string (matching the pattern `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`).
+
+**Validates: Requirements 11.8**
+
+---
+
+### Property 27: Health response fields and HTTP status
+
+*For any* combination of PostgreSQL and Redis availability (both up, DB down, Redis down, both down), `GET /health` SHALL return a JSON response containing both a `db` field and a `cache` field, each with value `"ok"` or `"error"`. The HTTP status SHALL be 200 if and only if both `db` and `cache` are `"ok"`; otherwise it SHALL be 503.
+
+**Validates: Requirements 12.1, 12.2, 12.5, 12.6**
+
+---
 
 ## Error Handling
 
-### Error Scenario 1: Ticket Not Found
+### Repository Layer
 
-**Condition**: Operacja na nieistniejącym ticketcie
-**Response**: Zwróć błąd `TICKET_NOT_FOUND` z identyfikatorem ticketu
-**Recovery**: Pozwól użytkownikowi wyszukać ticket lub utworzyć nowy
+All repositories propagate database errors to the service layer unless a specific handling contract is defined:
 
-### Error Scenario 2: Permission Denied
+| Scenario | Behaviour |
+|---|---|
+| Referential integrity violation (FK) | Propagate as-is; service layer maps to user-facing error |
+| Unique constraint violation (duplicate email) | Propagate as-is; service layer maps to user-facing error |
+| Connection error | Propagate as-is; global error handler returns HTTP 500 |
+| Invalid UUID format | Throw `ValidationError` before executing any query |
+| Empty update object | Return existing record without executing UPDATE |
 
-**Condition**: Użytkownik bez uprawnień próbuje wykonać operację
-**Response**: Zwróć błąd `PERMISSION_DENIED` z informacją o wymaganej roli
-**Recovery**: Zaproponuj kontakt z administratorem lub przekierowanie do właściwego interfejsu
+### Service Layer
 
-### Error Scenario 3: Invalid Status Transition
+- `TicketService.getTicket`: If `CommentRepository` or `TicketHistoryRepository` fails, return `{ success: false, error: ... }` — never return a partially populated ticket.
+- `NotificationService`: Notification delivery failures do not block the primary operation (ticket creation, assignment, etc.).
 
-**Condition**: Próba zmiany statusu niezgodna z maszyną stanów
-**Response**: Zwróć błąd `INVALID_STATUS_TRANSITION` z informacją o dozwolonych przejściach
-**Recovery**: Wyświetl aktualny status i możliwe akcje
+### Redis Graceful Degradation
 
-### Error Scenario 4: SLA Breach Detected
+Both the Queue Cache and Token Blacklist follow the same degradation pattern:
 
-**Condition**: Automatyczne wykrycie przekroczenia terminu SLA
-**Response**: Eskalacja ticketu, powiadomienie administratorów
-**Recovery**: Priorytetyzacja w kolejce, automatyczne przypisanie
+```
+try {
+  // Redis operation
+} catch (err) {
+  logger.warn('[component] Redis unavailable: %s', err.message);
+  // fall back to direct DB query (cache) or allow request (blacklist)
+}
+```
 
-### Error Scenario 5: Duplicate Ticket Submission
+### Migration Runner
 
-**Condition**: Użytkownik próbuje utworzyć ticket o tym samym tytule w krótkim czasie
-**Response**: Zwróć ostrzeżenie o możliwym duplikacie
-**Recovery**: Zaproponuj dodanie komentarza do istniejącego ticketu zamiast tworzenia nowego
+The migration runner uses a fail-fast strategy: any error during startup (connection failure, migration failure, timeout) logs the error and calls `process.exit(1)` to prevent the server from running against a broken or incomplete schema.
+
+### Health Endpoint
+
+Each connectivity check is wrapped in `Promise.race` with a 2-second timeout:
+
+```typescript
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+  Promise.race([promise, new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('timeout')), ms)
+  )]);
+```
+
+---
 
 ## Testing Strategy
 
-### Unit Testing Approach
+### Dual Testing Approach
 
-**Coverage Goals**: Minimum 80% code coverage
+Unit tests cover specific examples, edge cases, and error conditions. Property-based tests (using `fast-check`) verify universal properties across many generated inputs. Both are necessary for comprehensive coverage.
 
-**Key Test Cases**:
-1. Walidacja danych ticketu (poprawne i niepoprawne)
-2. Przejścia statusów (wszystkie dozwolone i niedozwolone)
-3. Uprawnienia użytkowników (wszystkie role)
-4. Obliczanie terminów SLA (wszystkie priorytety)
-5. Filtrowanie i sortowanie kolejki
-6. Tworzenie powiadomień
+### Property-Based Tests
 
-### Property-Based Testing Approach
+Each correctness property (Properties 1–27 above) is implemented as a single `fast-check` property test in `vitest`. Tests are tagged with a comment referencing the design property.
 
-**Property Test Library**: fast-check (JavaScript/TypeScript)
+**Configuration:**
+- Minimum 100 iterations per property test (fast-check default)
+- Tag format: `// Feature: it-ticket-management, Property N: <property_text>`
+- Library: `fast-check` (already installed as dev dependency)
 
-**Properties to Test**:
-1. **Status Transition Validity**: Dla dowolnego ticketu, każda zmiana statusu musi być zgodna z maszyną stanów
-2. **Priority Ordering**: Dla dowolnych dwóch ticketów z różnymi priorytetami, kolejność sortowania jest deterministyczna
-3. **Notification Delivery**: Dla dowolnej operacji zmieniającej ticket, odpowiednie powiadomienia są wysyłane
-4. **History Integrity**: Dla dowolnej sekwencji zmian, historia jest spójna i uporządkowana chronologicznie
-5. **Due Date Calculation**: Dla dowolnego priorytetu, due date jest zgodny ze SLA
+**Test file locations:**
+```
+src/database/migrations/__tests__/migration-runner.test.ts   (Properties 1, 2)
+src/config/__tests__/env.test.ts                             (Properties 3, 4)
+src/database/repositories/__tests__/ticket-repository.test.ts (Properties 5, 6, 7, 8)
+src/database/repositories/__tests__/user-repository.test.ts  (Properties 9, 10, 11, 12)
+src/database/repositories/__tests__/password-repository.test.ts (Properties 13, 14)
+src/database/repositories/__tests__/comment-repository.test.ts (Properties 15, 16)
+src/database/repositories/__tests__/notification-repository.test.ts (Properties 17, 18)
+src/database/repositories/__tests__/ticket-history-repository.test.ts (Property 19)
+src/services/__tests__/ticket-service.test.ts                (Property 20)
+src/services/__tests__/queue-service.test.ts                 (Properties 21, 22, 23)
+src/cache/__tests__/token-blacklist.test.ts                  (Properties 24, 25, 26)
+src/routes/__tests__/health.test.ts                          (Property 27)
+```
 
-### Integration Testing Approach
+### Unit Tests
 
-**Test Scenarios**:
-1. Pełny cykl życia ticketu: utworzenie → przypisanie → rozwiązanie → zamknięcie
-2. Eskalacja automatyczna po przekroczeniu SLA
-3. Powiadomienia email dla wszystkich typów zdarzeń
-4. Synchronizacja kolejki między wieloma administratorami (WebSocket)
-5. Współbieżne modyfikacje ticketu (optymistyczne blokowanie)
+Unit tests cover:
+- Specific error conditions (duplicate email, referential integrity violations, connection failures)
+- Edge cases (empty update object, non-existent IDs, expired tokens at logout)
+- Configuration checks (SSL flags, SIGTERM drain, npm run migrate script)
+- Migration file content (correct DDL, IF NOT EXISTS clauses, user_passwords table)
 
-## Performance Considerations
+### Integration Tests
 
-### Expected Load
-- 1000 aktywnych zgłoszeń
-- 100 jednoczesnych użytkowników (80 zgłaszających, 15 techników, 5 adminów)
-- 100 nowych zgłoszeń dziennie
+Integration tests (requiring a real PostgreSQL and Redis instance, run separately) cover:
+- Full migration application against a test database
+- Schema correctness after migration 0001
+- Service layer wiring (TicketService, UserService, QueueService, NotificationService using real repositories)
+- Redis TTL expiry for token blacklist entries
+- Health endpoint with real DB and Redis connectivity
 
-### Response Time Requirements
-- Lista zgłoszeń: < 500ms (z filtrowaniem i sortowaniem)
-- Szczegóły zgłoszenia: < 200ms
-- Utworzenie zgłoszenia: < 300ms
-- Powiadomienia w czasie rzeczywistym: < 1s opóźnienia
+### Test Approach for Repository Tests
 
-### Optimization Strategies
-1. **Indeksowanie bazy danych**: indeksy na status, priority, assigneeId, createdAt
-2. **Cache**: Redis dla często dostępnych danych (kolejka, statystyki)
-3. **Paginacja**: domyślnie 20 elementów na stronę
-4. **WebSocket**: dla powiadomień w czasie rzeczywistym zamiast polling
-5. **Background Jobs**: dla wysyłki emaili (kolejka zadań)
+Repository property tests use a test database (via `pg.Pool` pointed at a test schema) rather than mocks, to ensure SQL correctness. Each test runs in a transaction that is rolled back after the test, keeping tests isolated and fast.
 
-## Security Considerations
+For pure logic tests (cache key derivation, env config parsing, JWT claims), no database is needed and tests run entirely in-memory.
 
-### Authentication & Authorization
-- Uwierzytelnianie przez SSO/LDAP (integracja z Active Directory)
-- Tokeny JWT z krótkim czasem życia (15 minut)
-- Odświeżanie tokenów przez secure, httpOnly cookies
+### Unit Testing Balance
 
-### Access Control
-- Role-Based Access Control (RBAC)
-- Zgłaszający widzi tylko własne zgłoszenia
-- Technik widzi przypisane zgłoszenia i kolejkę
-- Admin ma pełny dostęp
-
-### Data Protection
-- Szyfrowanie połączeń (TLS 1.3)
-- Szyfrowanie załączników w spoczynku
-- Sanityzacja danych wejściowych (XSS prevention)
-- Parametryzowane zapytania SQL (SQL injection prevention)
-
-### Audit Logging
-- Wszystkie zmiany w ticketach zapisywane w historii
-- Logi dostępu i operacji administracyjnych
-- Retencja logów: 1 rok
-
-## Dependencies
-
-### Runtime Dependencies
-- Node.js 18+ / Python 3.11+ (do ustalenia)
-- PostgreSQL 15+ (baza danych)
-- Redis 7+ (cache, kolejka zadań, sesje)
-- WebSocket server (Socket.io / ws)
-
-### External Services
-- SMTP server (wysyłka email)
-- LDAP/Active Directory (uwierzytelnianie)
-- Storage service (S3/MinIO dla załączników)
-
-### Development Dependencies
-- Testing framework: Jest / Vitest
-- Property-based testing: fast-check
-- API documentation: OpenAPI/Swagger
-- Linting: ESLint / Pylint
+- Property tests handle broad input coverage — avoid duplicating this with many similar unit tests
+- Unit tests focus on: specific error messages, integration wiring, one-off edge cases
+- Aim for ~1–3 unit tests per error condition, not exhaustive enumeration

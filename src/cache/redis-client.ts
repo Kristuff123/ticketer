@@ -1,4 +1,4 @@
-import { createClient, RedisClientType } from 'redis';
+import { createClient, RedisClientType } from "redis";
 
 /**
  * Redis client configured from environment variables.
@@ -15,8 +15,8 @@ function getRedisUrl(): string {
   if (process.env.REDIS_URL) {
     return process.env.REDIS_URL;
   }
-  const host = process.env.REDIS_HOST || 'localhost';
-  const port = process.env.REDIS_PORT || '6379';
+  const host = process.env.REDIS_HOST || "localhost";
+  const port = process.env.REDIS_PORT || "6379";
   return `redis://${host}:${port}`;
 }
 
@@ -26,8 +26,8 @@ function getRedisUrl(): string {
 export function getClient(): RedisClientType {
   if (!client) {
     client = createClient({ url: getRedisUrl() }) as RedisClientType;
-    client.on('error', (err) => {
-      console.error('Redis client error:', err);
+    client.on("error", (err) => {
+      console.error("Redis client error:", err);
     });
   }
   return client;
@@ -69,7 +69,11 @@ export async function getCache<T = unknown>(key: string): Promise<T | null> {
 /**
  * Set a cached value with an optional TTL in seconds.
  */
-export async function setCache(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
+export async function setCache(
+  key: string,
+  value: unknown,
+  ttlSeconds?: number,
+): Promise<void> {
   const redisClient = getClient();
   const serialized = JSON.stringify(value);
   if (ttlSeconds && ttlSeconds > 0) {
@@ -85,4 +89,21 @@ export async function setCache(key: string, value: unknown, ttlSeconds?: number)
 export async function deleteCache(key: string): Promise<void> {
   const redisClient = getClient();
   await redisClient.del(key);
+}
+
+/**
+ * Lightweight health-check probe. Connects (if not already) and issues a
+ * PING command, throwing if the response is not "PONG". Callers can treat
+ * a rejected promise as a failed connectivity check.
+ * Requirements: 12.4
+ */
+export async function pingRedis(): Promise<void> {
+  const redisClient = getClient();
+  if (!redisClient.isOpen) {
+    await redisClient.connect();
+  }
+  const result = await redisClient.ping();
+  if (result !== "PONG") {
+    throw new Error(`Unexpected ping response: ${result}`);
+  }
 }
